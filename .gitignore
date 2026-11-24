@@ -4,7 +4,7 @@
 config.json
 index.json
 library/
-.venv/
+.venv*/
 viewer/.godot/
 __pycache__/
 *.pyc
