@@ -17,6 +17,9 @@ SPEC (JSON; paths may start with ~ or be relative to the project):
     runs: [{name, slot, log (train.py log.jsonl), trainLog (stdout, optional)}]
     speed: [{label, value, unit, note}]  measured generation speeds
     notes: ["...", ...]          caveats shown on the page
+    index                      optional: mapkit's index.json, for each song's audio
+                               file (the virtual player plays it; the page must
+                               stay on the machine that holds the files)
 
 Everything is computed here with evaluate.score, so all methods are measured
 identically: scores, the timing error of each note against the nearest real
@@ -191,6 +194,12 @@ def main():
             if d.get("chart") and d["characteristic"] == "Standard" and d["name"] in diffs:
                 notes = sorted((n[0], n[4], n[2], n[3], n[5]) for n in d["chart"]["notes"])
                 reals[(key, d["name"])] = notes
+    if spec.get("index") and os.path.exists(path(spec["index"])):
+        audio = {e.get("id"): e.get("audio", "") for e in json.load(open(path(spec["index"]))).get("songs", [])}
+        for s in songs:
+            a = audio.get(s["key"][3:] if s["key"].startswith("of-") else s["key"], "")
+            if a and os.path.exists(a):
+                s["audio"] = "file://" + a
     by_key = {s["key"]: s for s in songs}
     title_to_key = {s["title"]: s["key"] for s in songs}
     methods, rows, gen_sources = [], [], {}

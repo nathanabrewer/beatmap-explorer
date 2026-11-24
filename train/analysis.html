@@ -13,7 +13,7 @@
   --ref: #52514e; --band: rgba(42,120,214,0.08); --accent: #2a78d6;
   --s1: #2a78d6; --s2: #eb6834; --s3: #1baf7a; --s4: #eda100; --s5: #e87ba4; --s6: #008300; --s7: #6250d6; --s8: #e34948;
   --div-lo: #2a78d6; --div-mid: #f0efec; --div-hi: #e34948;
-  --seq-lo: #cde2fb; --seq-hi: #104281;
+  --seq-lo: #cde2fb; --seq-hi: #104281; --critical: #d03b3b;
 }
 :root[data-theme="dark"] .viz-root {
   color-scheme: dark;
@@ -23,7 +23,7 @@
   --ref: #c3c2b7; --band: rgba(57,135,229,0.12); --accent: #3987e5;
   --s1: #3987e5; --s2: #d95926; --s3: #199e70; --s4: #c98500; --s5: #d55181; --s6: #0ca30c; --s7: #9085e9; --s8: #e66767;
   --div-lo: #3987e5; --div-mid: #383835; --div-hi: #e66767;
-  --seq-lo: #1c2636; --seq-hi: #86b6ef;
+  --seq-lo: #1c2636; --seq-hi: #86b6ef; --critical: #d03b3b;
 }
 * { box-sizing: border-box; }
 body { margin: 0; }
@@ -90,6 +90,11 @@ table.data th { color: var(--text-secondary); font-weight: 600; position: sticky
 .pending { color: var(--text-muted); font-style: italic; }
 .strip-controls { display: flex; gap: 8px; align-items: center; margin: 6px 0; }
 .strip-controls input[type=range] { flex: 1; }
+.vp-row { display: flex; gap: 16px; flex-wrap: wrap; }
+.vp-side { flex: 1 1 420px; min-width: 0; }
+.vp-side canvas { width: 100%; background: var(--surface-2); border-radius: 8px; display: block; }
+.vp-events { font-size: 12px; color: var(--text-secondary); margin-top: 6px; max-height: 120px; overflow: auto; }
+.vp-events button { font-size: 12px; padding: 2px 6px; margin: 2px; }
 .scale { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--text-muted); margin-top: 6px; }
 .scale .bar { width: 160px; height: 8px; border-radius: 4px; }
 @media (max-width: 900px) { nav.side { display: none; } header.top, .filters, main { margin-left: 0; padding-left: 16px; padding-right: 16px; } }
@@ -106,6 +111,7 @@ table.data th { color: var(--text-secondary); font-weight: 600; position: sticky
   <a href="#timing">Timing</a>
   <a href="#snapping">Onset snapping</a>
   <a href="#detail">One song up close</a>
+  <a href="#player">Virtual player</a>
   <a href="#training">Training</a>
   <a href="#speed">Speed</a>
   <a href="#notes">How to read this</a>
@@ -132,6 +138,21 @@ table.data th { color: var(--text-secondary); font-weight: 600; position: sticky
     <div class="card" id="c-density"></div>
     <div class="card" id="c-strip" style="margin-top:16px"></div>
     <div class="card" id="c-songtable" style="margin-top:16px"></div></section>
+  <section id="player"><h2>Virtual player</h2><p class="lede">Two players swing the selected song side by side: the real map on the left (an expert's motion), another map on the right. Each cut is a stroke through its note in its arrow's direction; between cuts the saber curves from one cut into the next, and the arms follow by inverse kinematics from the shoulders. Good flow is a smooth pendulum. Flagged: a hand having to reposition between cuts faster than 99% of this song's real map asks (a snap), and the arms crossing. Click a flagged moment to jump there.</p>
+    <div class="card">
+      <div class="strip-controls">
+        <button id="vp-play">Play</button>
+        <label style="color:var(--text-secondary);font-size:13px">Speed <select id="vp-speed"><option value="0.25">¼×</option><option value="0.5">½×</option><option value="1" selected>1×</option></select></label>
+        <label style="color:var(--text-secondary);font-size:13px">Right side <select id="vp-method"></select></label>
+        <label style="color:var(--text-secondary);font-size:13px"><input type="checkbox" id="vp-sound" checked> Sound</label>
+        <input type="range" id="vp-time" min="0" max="100" step="0.01" value="0" aria-label="Time">
+        <span id="vp-clock" style="min-width:92px;color:var(--text-secondary);font-size:13px"></span>
+      </div>
+      <div class="vp-row"><div class="vp-side"><div class="sub" id="vp-l-name">Real map</div><canvas id="vp-l" height="420"></canvas><div class="vp-events" id="vp-l-ev"></div></div>
+      <div class="vp-side"><div class="sub" id="vp-r-name"></div><canvas id="vp-r" height="420"></canvas><div class="vp-events" id="vp-r-ev"></div></div></div>
+      <audio id="vp-audio" preload="auto"></audio>
+      <p class="sub" id="vp-note"></p>
+    </div></section>
   <section id="training"><h2>Training</h2><p class="lede">Held-out loss (on BeatSaver songs each run never trained on) over training time. Lower is better. Runs with different data sizes hold out different songs, so compare shapes more than exact values.</p>
     <div class="grid g2"><div class="card" id="c-loss"></div><div class="card" id="c-njs"></div></div></section>
   <section id="speed"><h2>Speed</h2><p class="lede">Compute time to write maps, as measured.</p><div class="grid g2"><div class="card" id="c-speed"></div><div class="card" id="c-gen"></div></div></section>
@@ -662,15 +683,215 @@ function renderNotes() {
   for (const m of DATA.methods) if (m.note) ul.append(el("li", {}, `${m.name}: ${m.note}`));
 }
 
+// ---------- virtual player ----------
+const VP = {t: 0, playing: false, last: 0, key: null, diff: null, method: null, left: null, right: null};
+const LANE = 0.6, LAYER = [0.85, 1.38, 1.89], REACH = 0.45, HANDS = ["#d64d8a", "#2fa8d8"];
+const DV = {0: [0, 1], 1: [0, -1], 2: [-1, 0], 3: [1, 0], 4: [-0.7071, 0.7071], 5: [0.7071, 0.7071], 6: [-0.7071, -0.7071], 7: [0.7071, -0.7071]};
+const OPP = {0: 1, 1: 0, 2: 3, 3: 2, 4: 7, 7: 4, 5: 6, 6: 5};
+const SHOULDER = [[-0.2, 1.45], [0.2, 1.45]], REST = [[-0.35, 1.05], [0.35, 1.05]];
+function layerY(y) { const i = Math.max(0, Math.min(2, y)); const f = Math.floor(Math.min(i, 1.999)); return LAYER[f] + (LAYER[f + 1] - LAYER[f]) * (i - f); }
+function swingsOf(notes, hand) {
+  const sw = [];
+  for (const n of notes.filter(n => n[1] === hand).sort((a, b) => a[0] - b[0])) {
+    const t = n[0] / 100, last = sw[sw.length - 1];
+    if (last && t - last.t < 0.03) { last.xs.push(n[2]); last.ys.push(n[3]); if (last.d === null && n[4] !== 8) last.d = n[4]; }
+    else sw.push({t, xs: [n[2]], ys: [n[3]], d: n[4] === 8 ? null : n[4]});
+  }
+  let prev = null;
+  for (const s of sw) {
+    s.x = (mean(s.xs) - 1.5) * LANE; s.y = layerY(mean(s.ys));
+    if (s.d === null) s.d = prev === null ? 1 : OPP[prev];
+    prev = s.d; s.v = DV[s.d];
+  }
+  sw.forEach((s, i) => { const a = i ? s.t - sw[i - 1].t : 1, b = i < sw.length - 1 ? sw[i + 1].t - s.t : 1; s.c = Math.max(0.02, Math.min(0.07, a / 3, b / 3)); });
+  return sw;
+}
+function hermite(p0, m0, p1, m1, u) { const u2 = u * u, u3 = u2 * u; return [0, 1].map(k => (2 * u3 - 3 * u2 + 1) * p0[k] + (u3 - 2 * u2 + u) * m0[k] + (-2 * u3 + 3 * u2) * p1[k] + (u3 - u2) * m1[k]); }
+function tipAt(sw, hand, t) {
+  const rest = REST[hand];
+  if (!sw.length) return rest;
+  let lo = 0, hi = sw.length - 1;
+  if (t < sw[0].t - sw[0].c) { const s = sw[0], entry = [s.x - s.v[0] * REACH, s.y - s.v[1] * REACH], u = Math.max(0, 1 - (s.t - s.c - t) / 0.5); return hermite(rest, [0, 0], entry, [s.v[0] * 0.6, s.v[1] * 0.6], u); }
+  while (lo < hi) { const mid = (lo + hi + 1) >> 1; if (sw[mid].t - sw[mid].c <= t) lo = mid; else hi = mid - 1; }
+  const s = sw[lo];
+  if (t <= s.t + s.c) { const k = (t - s.t) / s.c; return [s.x + s.v[0] * REACH * k, s.y + s.v[1] * REACH * k]; }
+  const exit = [s.x + s.v[0] * REACH, s.y + s.v[1] * REACH], n = sw[lo + 1];
+  if (!n) { const u = Math.min(1, (t - s.t - s.c) / 0.6); return hermite(exit, [s.v[0] * 0.6, s.v[1] * 0.6], rest, [0, 0], u); }
+  const t0 = s.t + s.c, t1 = n.t - n.c, T = Math.max(t1 - t0, 1e-3), u = Math.min(1, (t - t0) / T);
+  const entry = [n.x - n.v[0] * REACH, n.y - n.v[1] * REACH];
+  const m0 = Math.min(REACH / s.c * T, 1.1), m1 = Math.min(REACH / n.c * T, 1.1);
+  return hermite(exit, [s.v[0] * m0, s.v[1] * m0], entry, [n.v[0] * m1, n.v[1] * m1], u);
+}
+function armFor(hand, tip) {
+  const S = SHOULDER[hand], dx = tip[0] - S[0], dy = tip[1] - S[1], dist = Math.hypot(dx, dy) || 1e-6;
+  const reach = Math.min(0.55, dist * 0.6), H = [S[0] + dx / dist * reach, S[1] + dy / dist * reach];
+  const a = 0.3, b = 0.3, d = Math.min(reach, a + b - 1e-4), cos = (a * a + d * d - b * b) / (2 * a * d), ang = Math.acos(Math.max(-1, Math.min(1, cos)));
+  const base = Math.atan2(dy, dx), side = hand === 1 ? -1 : 1, e = base + side * ang;
+  return {S, E: [S[0] + a * Math.cos(e), S[1] + a * Math.sin(e)], H};
+}
+function transitions(sw) {
+  // How fast the hand must travel from where one cut ends to where the next begins.
+  const out = [];
+  for (let i = 0; i + 1 < sw.length; i++) {
+    const s = sw[i], n = sw[i + 1], T = Math.max(n.t - n.c - (s.t + s.c), 0.02);
+    const ex = [s.x + s.v[0] * REACH, s.y + s.v[1] * REACH], en = [n.x - n.v[0] * REACH, n.y - n.v[1] * REACH];
+    out.push({t: n.t, speed: Math.hypot(en[0] - ex[0], en[1] - ex[1]) / T});
+  }
+  return out;
+}
+function motion(notes) {
+  const sw = [swingsOf(notes, 0), swingsOf(notes, 1)];
+  const end = Math.max(...notes.map(n => n[0] / 100), 1) + 1;
+  const speed = [[], []], step = 0.01;
+  let prev = [tipAt(sw[0], 0, 0), tipAt(sw[1], 1, 0)];
+  const close = [];
+  for (let t = step; t < end; t += step) {
+    const cur = [tipAt(sw[0], 0, t), tipAt(sw[1], 1, t)];
+    for (const h of [0, 1]) speed[h].push(Math.hypot(cur[h][0] - prev[h][0], cur[h][1] - prev[h][1]) / step);
+    if (Math.hypot(cur[0][0] - cur[1][0], cur[0][1] - cur[1][1]) < 0.12) close.push(t);
+    prev = cur;
+  }
+  const crossed = [];
+  for (const s of sw[0]) {
+    const r = sw[1].find(x => Math.abs(x.t - s.t) < 0.03);
+    if (r && s.x - r.x > 0.15) crossed.push(s.t);
+  }
+  return {sw, speed, close, step, end, trans: [transitions(sw[0]), transitions(sw[1])], crossed};
+}
+function quantile(a, q) { const b = [...a].sort((x, y) => x - y); return b[Math.floor(q * (b.length - 1))] || 0; }
+function events(m, limit) {
+  const out = [];
+  for (const h of [0, 1]) for (const tr of m.trans[h]) if (tr.speed > limit) out.push({t: tr.t, kind: "snap", hand: h, v: tr.speed});
+  for (const t of m.crossed) out.push({t, kind: "arms crossed"});
+  return out.sort((a, b) => a.t - b.t);
+}
+function vpNotes(side) {
+  const diff = state.diff === "all" ? "ExpertPlus" : state.diff;
+  if (side === "real") { const r = DATA.real[`${VP.key}|${diff}`]; return r ? r.notes : []; }
+  const row = DATA.rows.find(r => r.m === side && r.s === VP.key && r.d === diff); return row ? row.notes : [];
+}
+function vpSetup() {
+  const key = state.detailSong || DATA.songs[0].key, diff = state.diff === "all" ? "ExpertPlus" : state.diff;
+  const sel = $("vp-method");
+  const options = DATA.methods.filter(m => DATA.rows.some(r => r.m === m.id && r.s === key && r.d === diff));
+  if (!VP.method || !options.some(m => m.id === VP.method)) VP.method = (options.find(m => m.id === "large") || options[0] || {}).id;
+  sel.replaceChildren(...options.map(m => { const o = el("option", {value: m.id}, m.name); if (m.id === VP.method) o.selected = true; return o; }));
+  if (VP.key === key && VP.diff === diff && VP.loaded === VP.method) return;
+  VP.key = key; VP.diff = diff; VP.loaded = VP.method;
+  VP.left = motion(vpNotes("real")); VP.right = motion(vpNotes(VP.method));
+  VP.limit = Math.max(3, quantile(VP.left.trans[0].concat(VP.left.trans[1]).map(x => x.speed), 0.99) * 1.1);
+  VP.evL = events(VP.left, VP.limit); VP.evR = events(VP.right, VP.limit);
+  const song = songsByKey[key], dur = Math.max(VP.left.end, VP.right.end, song.seconds);
+  $("vp-time").max = dur;
+  if (VP.t > dur) VP.t = 0;
+  if (!VP.t) VP.t = Math.max(0, (VP.left.sw[0][0] || VP.left.sw[1][0] || {t: 1}).t - 1);
+  $("vp-l-name").textContent = `Real map · ${song.title} · ${DIFF_NAMES[diff]}`;
+  $("vp-r-name").textContent = (methodsById[VP.method] || {}).name || "";
+  const audio = $("vp-audio");
+  if (song.audio && audio.dataset.src !== song.audio) { audio.dataset.src = song.audio; audio.src = song.audio; }
+  $("vp-note").textContent = song.audio ? "Sound: the song's file on this Mac." : "No audio file for this song.";
+  for (const [id, ev] of [["vp-l-ev", VP.evL], ["vp-r-ev", VP.evR]]) {
+    const box = $(id); box.replaceChildren();
+    const snaps = ev.filter(e => e.kind === "snap").length, coll = ev.length - snaps;
+    box.append(el("div", {}, `${snaps} snap${snaps === 1 ? "" : "s"} (a hand repositioning faster than ${VP.limit.toFixed(1)} m/s, beyond 99% of this song's real map), ${coll} time${coll === 1 ? "" : "s"} arms crossed`));
+    for (const e of ev.slice(0, 40)) { const b = el("button", {}, `${clock(e.t)} ${e.kind}`); b.onclick = () => vpSeek(e.t - 1.2); box.append(b); }
+  }
+  vpDraw();
+}
+function vpSeek(t) { VP.t = Math.max(0, t); const a = $("vp-audio"); if (VP.playing && a.src && $("vp-sound").checked) a.currentTime = VP.t; vpDraw(); }
+function vpCanvas(id) {
+  const c = $(id), w = c.clientWidth || 480, dpr = window.devicePixelRatio || 1;
+  if (c.width !== Math.round(w * dpr)) { c.width = Math.round(w * dpr); c.height = Math.round(420 * dpr); }
+  const ctx = c.getContext("2d"); ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  const W = w, H = 420, sc = Math.min(W / 2.8, H / 2.3);
+  return {ctx, W, H, X: x => W / 2 + x * sc, Y: y => H - 18 - (y - 0.1) * sc, sc};
+}
+function vpRender(id, m, notes, evs) {
+  const {ctx, W, H, X, Y, sc} = vpCanvas(id), t = VP.t;
+  ctx.clearRect(0, 0, W, H);
+  ctx.strokeStyle = css("--grid"); ctx.lineWidth = 1;
+  for (let i = 0; i <= 4; i++) { ctx.beginPath(); ctx.moveTo(X((i - 2) * LANE), Y(0.58)); ctx.lineTo(X((i - 2) * LANE), Y(2.16)); ctx.stroke(); }
+  for (const yy of [0.58, 1.11, 1.63, 2.16]) { ctx.beginPath(); ctx.moveTo(X(-2 * LANE), Y(yy)); ctx.lineTo(X(2 * LANE), Y(yy)); ctx.stroke(); }
+  // notes arriving (the next 0.9 s) and just cut (0.15 s)
+  for (const n of notes) {
+    const nt = n[0] / 100, dt = nt - t;
+    if (dt > 0.9 || dt < -0.15) continue;
+    const k = dt >= 0 ? 0.35 + 0.65 * (1 - dt / 0.9) : 1, alpha = dt >= 0 ? 0.25 + 0.75 * (1 - dt / 0.9) : 1 + dt / 0.15;
+    const cx = X((n[2] - 1.5) * LANE), cy = Y(layerY(n[3])), s = 0.13 * sc * k;
+    ctx.globalAlpha = Math.max(0, alpha); ctx.fillStyle = HANDS[n[1]];
+    ctx.fillRect(cx - s, cy - s, 2 * s, 2 * s);
+    ctx.fillStyle = "#ffffff";
+    if (n[4] === 8) { ctx.beginPath(); ctx.arc(cx, cy, s * 0.25, 0, 7); ctx.fill(); }
+    else { const v = DV[n[4]], px = -v[1], py = v[0]; ctx.beginPath(); ctx.moveTo(cx + v[0] * s * 0.7, cy - v[1] * s * 0.7); ctx.lineTo(cx - v[0] * s * 0.1 + px * s * 0.6, cy + v[1] * s * 0.1 - py * s * 0.6); ctx.lineTo(cx - v[0] * s * 0.1 - px * s * 0.6, cy + v[1] * s * 0.1 + py * s * 0.6); ctx.fill(); }
+  }
+  ctx.globalAlpha = 1;
+  // body
+  ctx.strokeStyle = css("--text-muted"); ctx.lineWidth = 3; ctx.lineCap = "round";
+  ctx.beginPath(); ctx.arc(X(0), Y(1.66), 0.1 * sc, 0, 7); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(X(-0.2), Y(1.45)); ctx.lineTo(X(0.2), Y(1.45)); ctx.moveTo(X(0), Y(1.45)); ctx.lineTo(X(0), Y(0.95)); ctx.stroke();
+  for (const h of [0, 1]) {
+    // trail: the last 0.35 s of the tip, its width the speed
+    for (let k = 35; k > 0; k--) {
+      const a = tipAt(m.sw[h], h, t - k * 0.01), b = tipAt(m.sw[h], h, t - (k - 1) * 0.01), v = Math.hypot(b[0] - a[0], b[1] - a[1]) / 0.01;
+      ctx.strokeStyle = v > VP.limit ? css("--critical") : HANDS[h]; ctx.globalAlpha = (1 - k / 36) * 0.8; ctx.lineWidth = 2 + Math.min(6, v / 2);
+      ctx.beginPath(); ctx.moveTo(X(a[0]), Y(a[1])); ctx.lineTo(X(b[0]), Y(b[1])); ctx.stroke();
+    }
+    ctx.globalAlpha = 1;
+    const tip = tipAt(m.sw[h], h, t), arm = armFor(h, tip);
+    ctx.strokeStyle = css("--text-secondary"); ctx.lineWidth = 4;
+    ctx.beginPath(); ctx.moveTo(X(arm.S[0]), Y(arm.S[1])); ctx.lineTo(X(arm.E[0]), Y(arm.E[1])); ctx.lineTo(X(arm.H[0]), Y(arm.H[1])); ctx.stroke();
+    ctx.strokeStyle = HANDS[h]; ctx.lineWidth = 3;
+    ctx.beginPath(); ctx.moveTo(X(arm.H[0]), Y(arm.H[1])); ctx.lineTo(X(tip[0]), Y(tip[1])); ctx.stroke();
+    ctx.fillStyle = HANDS[h]; ctx.beginPath(); ctx.arc(X(tip[0]), Y(tip[1]), 4, 0, 7); ctx.fill();
+  }
+  const near = evs.find(e => Math.abs(e.t - t) < 0.25);
+  if (near) { ctx.fillStyle = css("--critical"); ctx.font = "600 14px system-ui"; ctx.fillText(`⚠ ${near.kind}`, 12, 22); }
+}
+function vpDraw() {
+  if (!VP.left) return;
+  vpRender("vp-l", VP.left, vpNotes("real"), VP.evL);
+  vpRender("vp-r", VP.right, vpNotes(VP.method), VP.evR);
+  $("vp-time").value = VP.t; $("vp-clock").textContent = `${clock(VP.t)} · ${VP.t.toFixed(2)} s`;
+}
+function vpTick(now) {
+  if (!VP.playing) return;
+  const a = $("vp-audio"), rate = +$("vp-speed").value;
+  if (a.src && $("vp-sound").checked && !a.paused) VP.t = a.currentTime;
+  else VP.t += (now - VP.last) / 1000 * rate;
+  VP.last = now;
+  if (VP.t >= +$("vp-time").max) { VP.playing = false; $("vp-play").textContent = "Play"; a.pause(); }
+  vpDraw();
+  requestAnimationFrame(vpTick);
+}
+function vpWire() {
+  $("vp-play").onclick = () => {
+    const a = $("vp-audio");
+    VP.playing = !VP.playing; $("vp-play").textContent = VP.playing ? "Pause" : "Play";
+    if (VP.playing) { VP.last = performance.now(); if (a.src && $("vp-sound").checked) { a.currentTime = VP.t; a.playbackRate = +$("vp-speed").value; a.play().catch(() => {}); } requestAnimationFrame(vpTick); }
+    else a.pause();
+  };
+  $("vp-time").oninput = e => vpSeek(+e.target.value);
+  $("vp-speed").onchange = () => { $("vp-audio").playbackRate = +$("vp-speed").value; };
+  $("vp-sound").onchange = () => { const a = $("vp-audio"); if (!$("vp-sound").checked) a.pause(); else if (VP.playing && a.src) { a.currentTime = VP.t; a.play().catch(() => {}); } };
+  $("vp-method").onchange = e => { VP.method = e.target.value; vpSetup(); };
+  const h = new URLSearchParams(location.hash.slice(1));
+  if (h.get("song")) state.detailSong = h.get("song");
+  if (h.get("diff")) state.diff = h.get("diff");
+  if (h.get("method")) VP.method = h.get("method");
+  if (h.get("t")) VP.t = +h.get("t");
+  if (h.get("focus")) setTimeout(() => { const f = document.getElementById(h.get("focus")); if (f) f.scrollIntoView(); }, 50);
+}
+
 function renderAll() {
   hideTip();
-  renderFilters(); renderOverview(); renderBoard(); renderMulti(); renderHeat(); renderTiming(); renderSnapping(); renderDetail(); renderTraining(); renderSpeed(); renderNotes();
+  renderFilters(); renderOverview(); renderBoard(); renderMulti(); renderHeat(); renderTiming(); renderSnapping(); renderDetail(); vpSetup(); renderTraining(); renderSpeed(); renderNotes();
 }
 document.querySelectorAll("nav.side .theme button").forEach(b => b.onclick = () => { document.documentElement.dataset.theme = b.dataset.t; renderAll(); });
 const links = [...document.querySelectorAll("nav.side a")];
 const obs = new IntersectionObserver(es => es.forEach(e => { if (e.isIntersecting) links.forEach(a => a.classList.toggle("on", a.getAttribute("href") === "#" + e.target.id)); }), {rootMargin: "-40% 0px -55% 0px"});
 document.querySelectorAll("main section").forEach(s => obs.observe(s));
 let rt; window.addEventListener("resize", () => { clearTimeout(rt); rt = setTimeout(renderAll, 150); });
+vpWire();
 renderAll();
 </script>
 </body>
