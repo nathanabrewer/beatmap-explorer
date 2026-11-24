@@ -31,6 +31,18 @@ import tokens as T  # noqa: E402
 from model import MapModel, parameters_m  # noqa: E402
 
 
+def cpu_budget():
+    """CPUs this process may use: the container's quota where there is one
+    (os.cpu_count() reports the whole host)."""
+    try:
+        q, p = open("/sys/fs/cgroup/cpu.max").read().split()[:2]
+        if q != "max":
+            return max(1, int(int(q) / int(p)))
+    except (OSError, ValueError):
+        pass
+    return len(os.sched_getaffinity(0)) if hasattr(os, "sched_getaffinity") else (os.cpu_count() or 1)
+
+
 def device():
     if torch.cuda.is_available():
         return torch.device("cuda")
@@ -148,6 +160,9 @@ def main():
     ap.add_argument("--save-minutes", type=float, default=0, help="also save last.pt this often")
     a = ap.parse_args()
     os.makedirs(a.out, exist_ok=True)
+    # The CPU side only cuts windows and launches kernels; a pool as wide as
+    # a big host starves the GPU (see cloud_run.sh).
+    torch.set_num_threads(min(6, cpu_budget()))
     torch.manual_seed(a.seed)
     dev = device()
     ranks = {int(r) for r in a.ranks.split(",")} if a.ranks else None

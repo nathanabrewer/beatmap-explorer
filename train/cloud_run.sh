@@ -35,6 +35,11 @@ print(max(1, int(quota())))
 PY
 )
 workers="${WORKERS:-$(( cpus < 24 ? cpus : 24 ))}"
+# Thread pools sized to the CPUs this container may use, not the host's: a
+# 208-core host behind a 25-core quota gave the trainer 1,003 threads, and
+# every small CPU step then waited on all of them while the GPU sat idle.
+pool=$(( cpus < 6 ? cpus : 6 ))
+export OMP_NUM_THREADS="$pool" MKL_NUM_THREADS="$pool" OPENBLAS_NUM_THREADS="$pool"
 started=$(date +%s)
 limit=""; command -v timeout >/dev/null && limit="timeout ${EVAL_SECONDS:-360}"
 stamp() { echo "[$(( $(date +%s) - started ))s] $*" | tee -a "$out/timeline.txt"; }
