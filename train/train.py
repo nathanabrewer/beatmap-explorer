@@ -125,6 +125,7 @@ def main():
     ap.add_argument("--lr", type=float, default=3e-4)
     ap.add_argument("--warmup", type=int, default=2000)
     ap.add_argument("--holdout", type=float, default=0.02)
+    ap.add_argument("--test-songs", help="a file of song titles held out from training in every source (see data.read_test_songs)")
     ap.add_argument("--eval-every", type=int, default=1000)
     ap.add_argument("--init")
     ap.add_argument("--ranks", help="only these difficulties, e.g. 3,4 (0 Easy .. 4 Expert+)")
@@ -139,8 +140,9 @@ def main():
     dev = device()
     ranks = {int(r) for r in a.ranks.split(",")} if a.ranks else None
     chars = set(a.chars.split(",")) if a.chars else None
-    train = D.Windows(a.data, "train", a.holdout, ranks=ranks, chars=chars, seed=a.seed)
-    test = D.Windows(a.data, "test", a.holdout, ranks=ranks, chars=chars, seed=a.seed + 1)
+    test_songs = D.read_test_songs(a.test_songs)
+    train = D.Windows(a.data, "train", a.holdout, ranks=ranks, chars=chars, seed=a.seed, test_songs=test_songs)
+    test = D.Windows(a.data, "test", a.holdout, ranks=ranks, chars=chars, seed=a.seed + 1, test_songs=test_songs)
     print(f"{len(train)} training charts, {len(test)} held-out charts; device {dev}", flush=True)
     model = MapModel(a.size)
     start_step = 0

@@ -99,6 +99,7 @@ def main():
     ap.add_argument("--ckpt", required=True)
     ap.add_argument("--data", action="append", required=True)
     ap.add_argument("--holdout", type=float, default=0.02)
+    ap.add_argument("--test-songs", help="score these songs (a file of titles); with --holdout 0, only these")
     ap.add_argument("--limit", type=int, default=20)
     ap.add_argument("--diff", action="append")
     ap.add_argument("--temperature", type=float, default=0.9)
@@ -110,7 +111,7 @@ def main():
     model = MapModel(ck["config"]["size"])
     model.load_state_dict(ck["model"])
     model.to(dev).eval()
-    test = D.Windows(a.data, "test", a.holdout)
+    test = D.Windows(a.data, "test", a.holdout, test_songs=D.read_test_songs(a.test_songs))
     wanted = {G.NAMES.index(d) for d in a.diff} if a.diff else None
     items = [it for it in test.items if (wanted is None or it[1]["rank"] in wanted) and it[1]["char"] == "Standard"][: a.limit]
     results = []
