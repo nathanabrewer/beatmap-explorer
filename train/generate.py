@@ -3,7 +3,7 @@
     python3 -I train/generate.py --ckpt runs/NAME/best.pt --audio song.mp3 --title "Name" --artist "Who" \
         [--diff Expert --diff ExpertPlus] [--char Standard] [--out library/community/generated] \
         [--temperature 0.9] [--seed 1] [--no-rules]
-    python3 -I train/generate.py --ckpt ... --prepared library/train/official/of-100bills   (a prepared song)
+    python3 -I train/generate.py --ckpt ... --prepared library/train/official/of-SONG   (a prepared song)
 
 Writes a map folder (Info.dat v2.1 + one v3.3 file per difficulty + the song
 as Ogg) that Beatmap Explorer lists, the game loads and other map tools read.
@@ -32,6 +32,15 @@ from model import MapModel  # noqa: E402
 NAMES = ["Easy", "Normal", "Hard", "Expert", "ExpertPlus"]
 RANK_NUMBER = [1, 3, 5, 7, 9]
 UP, DOWN = {0, 4, 5}, {1, 6, 7}
+# Playability guard rails (with rules on): the shortest time, in 10 ms ticks,
+# between two notes of one hand per difficulty (mapgen's values for Hard and
+# up), and between the starts of two walls. Notes at the same moment (stacks)
+# are allowed.
+HAND_GAP = {0: 60, 1: 45, 2: 40, 3: 25, 4: 20}
+WALL_GAP = 100
+# Bombs only when both hands are free and at most one every half second, so
+# they are not used as filler while a hand waits.
+BOMB_GAP = 50
 
 
 def classes(dev):
@@ -43,30 +52,57 @@ def classes(dev):
         "wallx": mask(lambda n: n.startswith("WALLX_")), "wally": mask(lambda n: n.startswith("WALLY_")),
         "wdur": mask(lambda n: n.startswith("WDUR_")), "rot": mask(lambda n: n.startswith("ROT_")),
         "njs": mask(lambda n: n.startswith("NJS_")), "eos": mask(lambda n: n == "EOS"),
+        "note0": mask(lambda n: n.startswith("NOTE_0")), "note1": mask(lambda n: n.startswith("NOTE_1")),
     }
 
 
-def make_allow(C, sep_len, start_tick, hands, rules):
+def make_allow(C, sep_len, start_tick, hands, rules, rank=4, lasts=None):
     """Grammar (and optionally playability) for the tokens after SEP.
-    `hands` = {colour: (song tick, "up"|"down")} from earlier windows; notes
-    written earlier in this window are read from the tokens themselves."""
+    `hands` = {colour: (song tick, "up"|"down")} and `lasts` = {colour or
+    "wall": song tick} from earlier windows; what this window wrote so far is
+    read from the tokens themselves."""
     ctx = int(T.CONTEXT * T.TICKS)
     none = torch.zeros_like(C["eos"])
+    gap = HAND_GAP.get(rank, 20)
 
     def allow(toks):
         body = toks[sep_len:]
         last = T.NAMES[body[-1]] if body else "SEP"
-        tick, state = None, dict(hands)
+        tick, state, seen = None, dict(hands), dict(lasts or {})
         for i, t in enumerate(body):
+            name = T.NAMES[t]
             if T.is_time(t):
                 tick = t - T.TIME0
-            elif T.NAMES[t].startswith("DIR_") and i > 0 and tick is not None:
-                swing = note_swing(int(T.NAMES[t][4:]))
+            elif name.startswith("DIR_") and i > 0 and tick is not None:
+                c = int(T.NAMES[body[i - 1]][5])
+                seen[c] = start_tick + tick
+                swing = note_swing(int(name[4:]))
                 if swing:
-                    state[int(T.NAMES[body[i - 1]][5])] = (start_tick + tick, swing)
-        objects = C["note"] | C["bomb"] | C["wallx"]
+                    state[c] = (start_tick + tick, swing)
+            elif name.startswith("WALLX_") and tick is not None:
+                seen["wall"] = start_tick + tick
+            elif name.startswith("BOMB_") and tick is not None:
+                seen["bomb"] = start_tick + tick
+        now = start_tick + tick if tick is not None else None
+
+        def hand_free(c):
+            return c not in seen or now is None or now == seen[c] or now - seen[c] >= gap
+
+        objects = torch.zeros_like(C["eos"])
+        if not rules or (hand_free(0) and hand_free(1) and ("bomb" not in seen or now is None or now == seen["bomb"] or now - seen["bomb"] >= BOMB_GAP)):
+            objects |= C["bomb"]
+        if not rules or hand_free(0):
+            objects |= C["note0"]
+        if not rules or hand_free(1):
+            objects |= C["note1"]
+        if not rules or "wall" not in seen or now is None or now - seen["wall"] >= WALL_GAP:
+            objects |= C["wallx"]
         later_time = C["time"].clone()
-        later_time[T.TIME0:T.TIME0 + max(ctx, (tick + 1) if tick is not None else ctx)] = False
+        floor = max(ctx, (tick + 1) if tick is not None else ctx)
+        if rules and 0 in seen and 1 in seen:
+            # The next moment comes when at least one hand is free again.
+            floor = max(floor, min(seen[0], seen[1]) + gap - start_tick)
+        later_time[T.TIME0:T.TIME0 + min(floor, T.N_TIME)] = False
         if last == "SEP":
             return later_time | C["eos"] | C["rot"]
         if last.startswith("ROT_"):
@@ -115,7 +151,7 @@ def generate_difficulty(model, mel, rank, char, dev, temperature, rules, seed):
     njs = predict_njs(model, mel, rank, char, dev, C)
     step = int((T.WINDOW - T.CONTEXT) * T.TICKS)
     ctx = int(T.CONTEXT * T.TICKS)
-    objects, hands, rot = [], {}, 0.0
+    objects, hands, rot, lasts = [], {}, 0.0, {}
     start = -ctx
     while start < frames:
         x = window_mel(mel, start)
@@ -126,7 +162,8 @@ def generate_difficulty(model, mel, rank, char, dev, temperature, rules, seed):
             prefix = prefix[:-1]   # drop EOS; it ends with SEP
         else:
             prefix, sep = T.header(rank, char, njs, rot) + [T.SEP], 5
-        out = model.generate(torch.tensor(x, device=dev), prefix, temperature=temperature, allow=make_allow(C, len(prefix), start, hands, rules))
+        out = model.generate(torch.tensor(x, device=dev), prefix, temperature=temperature,
+                             allow=make_allow(C, len(prefix), start, hands, rules, rank, lasts))
         body = out[len(prefix):]
         cur_tick, i = None, 0
         while i < len(body):
@@ -144,11 +181,14 @@ def generate_difficulty(model, mel, rank, char, dev, temperature, rules, seed):
                                 "c": c, "x": int(name[6]), "y": int(name[7]), "d": d})
                 if note_swing(d):
                     hands[c] = (cur_tick, note_swing(d))
+                lasts[c] = cur_tick
                 i += 1
             elif cur_tick is not None and name.startswith("BOMB_"):
+                lasts["bomb"] = cur_tick
                 objects.append({"tick": cur_tick, "order": 2, "toks": (body[i],), "rot": rot, "kind": "bomb", "x": int(name[5]), "y": int(name[6])})
             elif cur_tick is not None and name.startswith("WALLX_") and i + 2 < len(body):
                 wy, wd = T.NAMES[body[i + 1]], T.NAMES[body[i + 2]]
+                lasts["wall"] = cur_tick
                 objects.append({"tick": cur_tick, "order": 1, "toks": tuple(body[i:i + 3]), "rot": rot, "kind": "wall", "x": int(name[6]),
                                 "w": int(name[7]), "y": int(wy[6]), "h": int(wy[7]), "dur": T.WALL_DURATIONS[int(wd[5:])]})
                 i += 2

@@ -1,0 +1,132 @@
+{
+ "public": true,
+ "title": "Beatmap Explorer: first trained map maker",
+ "subtitle": "2026-11-24 \u00b7 26M-parameter model, 20 minutes on one rented RTX 4090, 5,145 BeatSaver songs (14,821 difficulties)",
+ "curves": [
+  {
+   "title": "Held-out loss on BeatSaver songs it never heard",
+   "log": "training-log.jsonl",
+   "y": "heldout",
+   "yLabel": "held-out loss"
+  }
+ ],
+ "tables": [
+  {
+   "title": "Scores on held-out BeatSaver maps (small sample: 6 difficulties of 2 songs)",
+   "columns": [
+    "song",
+    "difficulty",
+    "timing F1",
+    "colour F1",
+    "place",
+    "cut",
+    "density",
+    "speed",
+    "mapper's speed"
+   ],
+   "rows": [
+    [
+     "BOOM",
+     "Easy",
+     0.22568093385214005,
+     0.11785714285714285,
+     0.45454545454545453,
+     0.45454545454545453,
+     1.1374045801526718,
+     10,
+     10.0
+    ],
+    [
+     "BOOM",
+     "Normal",
+     0.23464566929133857,
+     0.13603473227206947,
+     0.2553191489361702,
+     0.43617021276595747,
+     3.1008902077151337,
+     14,
+     12.0
+    ],
+    [
+     "BOOM",
+     "Hard",
+     0.36900369003690037,
+     0.17624521072796934,
+     0.2391304347826087,
+     0.33695652173913043,
+     1.6034912718204488,
+     16,
+     14.0
+    ],
+    [
+     "BOOM",
+     "Expert",
+     0.38716356107660455,
+     0.26459143968871596,
+     0.17058823529411765,
+     0.2529411764705882,
+     1.6331967213114753,
+     16,
+     16.0
+    ],
+    [
+     "BOOM",
+     "ExpertPlus",
+     0.34542314335060453,
+     0.23699059561128527,
+     0.21693121693121692,
+     0.23809523809523808,
+     1.4576271186440677,
+     18,
+     18.0
+    ],
+    [
+     "Miku",
+     "Expert",
+     0.39341917024320455,
+     0.2390011890606421,
+     0.23383084577114427,
+     0.20398009950248755,
+     1.0462287104622872,
+     16,
+     18.0
+    ],
+    [
+     "mean",
+     "",
+     0.32588936130846546,
+     0.19512005170297084,
+     0.2617242227101187,
+     0.3204481171864761,
+     1.663139768351014,
+     "",
+     ""
+    ]
+   ]
+  }
+ ],
+ "images": [
+  {
+   "src": "laser-cut-expertplus.png",
+   "caption": "Expert+ it made for \"Laser Cut\" by Sciurid (Illusory, Secret Centre, 2020; CC BY 4.0, archive.org/details/secretcentre)"
+  },
+  {
+   "src": "laser-cut-player.png",
+   "caption": "The same song's Expert from the player's place, showing only what has landed on the lane"
+  },
+  {
+   "src": "december-expert.png",
+   "caption": "Expert for \"December\" by Valya Kan (Yarn Audio, YARN020, 2018; CC BY 4.0, archive.org/details/yarn020)"
+  },
+  {
+   "src": "astra-hard.png",
+   "caption": "Hard for \"Astra / First Light\", from the side"
+  }
+ ],
+ "notes": [
+  "Timing F1: share of notes at the right moment (within 30 ms of the mapper's), colour ignored; colour F1 adds the hand. Place and cut: agreement on lane/row and cut direction for matched notes. Density: generated notes per second / the mapper's.",
+  "Maps are generated with guard rails: a hand's notes at least 0.2-0.6 s apart by difficulty, at most one new wall a second, bombs only when both hands are free. Without them the model overfills (density 1.66 on this sample).",
+  "Not yet: arcs, chains and lights; more training (this run used a sixth of the dataset for 20 minutes).",
+  "The trained weights are not published: they learned from community maps whose mappers keep their rights."
+ ]
+}

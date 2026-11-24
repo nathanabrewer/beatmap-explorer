@@ -46,8 +46,14 @@ def batches(ds, batch, seed, workers=4, depth=8):
 
     def work(k):
         rng = random.Random(seed * 1000 + k)
+        failures = 0
         while True:
-            q.put(D.collate([ds.sample(rng) for _ in range(batch)]))
+            try:
+                q.put(D.collate([ds.sample(rng) for _ in range(batch)]))
+            except Exception as error:  # noqa: BLE001 - a bad window must not stall training
+                failures += 1
+                if failures <= 5 or failures % 100 == 0:
+                    print(f"batch worker {k}: {type(error).__name__}: {error} ({failures} so far)", flush=True)
 
     for k in range(workers):
         threading.Thread(target=work, args=(k,), daemon=True).start()

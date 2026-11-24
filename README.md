@@ -94,6 +94,42 @@ Paths may start with `~` or be relative to this folder. `config.json`,
   they land, without the fly-in. Note speed changes (v4.1) are listed, not
   applied. Noodle/Chroma mod data is ignored.
 
+## A trained map maker (results so far)
+
+`train/` holds an audio-to-map model and everything around it: building the
+dataset from BeatSaver, training on a rented GPU, generating maps, scoring them
+on songs the model never heard, and opening the results here. See
+[train/README.md](train/README.md).
+
+**First run (2026-11-24):** a 26M-parameter model trained for 20 minutes on one
+rented RTX 4090 (about $0.60), from 5,145 BeatSaver songs (14,821
+difficulties) that the machine downloaded and prepared itself in 12 minutes.
+The held-out loss on songs it never heard fell from 2.01 to 1.59.
+
+![Held-out loss during training](docs/results/training-curve.png)
+
+On held-out BeatSaver maps (a small sample: 6 difficulties of 2 songs) it puts
+33 % of notes at the mapper's moments within 30 ms (timing F1 0.33, colour F1
+0.20), matches the mapper's note speed on 4 of 6, and makes almost no
+same-direction swing errors. Its main fault so far: on unfamiliar music it
+overfills, so maps are generated with guard rails (minimum time between a
+hand's notes per difficulty, limits on walls and bombs). Full numbers:
+[docs/results/index.html](docs/results/index.html).
+
+Maps it made for songs it never heard, opened in Beatmap Explorer:
+
+![Laser Cut, Expert+](docs/results/laser-cut-expertplus.png)
+*Expert+ for "Laser Cut" by Sciurid (Illusory, Secret Centre, 2020; CC BY 4.0,
+[archive.org/details/secretcentre](https://archive.org/details/secretcentre)).*
+
+![December, Expert](docs/results/december-expert.png)
+*Expert for "December" by Valya Kan (Yarn Audio, YARN020, 2018; CC BY 4.0,
+[archive.org/details/yarn020](https://archive.org/details/yarn020)).*
+
+Not yet: arcs, chains and lights, and longer training (this run used a sixth of
+the dataset list for 20 minutes). The trained weights are not published: they
+learned from community maps whose mappers keep their rights.
+
 ## Please note
 
 This project contains no songs, maps or game files. Use `mapkit` only with a

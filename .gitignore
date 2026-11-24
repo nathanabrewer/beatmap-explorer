@@ -4,7 +4,7 @@
 config.json
 index.json
 library/
-.venv/
+.venv*/
 viewer/.godot/
 __pycache__/
 *.pyc
@@ -21,3 +21,4 @@ bundle
 *.png
 *.jpg
 !docs/*.png
+!docs/results/*.png
