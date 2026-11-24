@@ -14,6 +14,13 @@ import torch.nn.functional as F
 
 import tokens as T
 
+# PyTorch can route attention through cuDNN on H100-class cards, and cuDNN
+# builds a plan for every new sequence length. Map windows vary in length
+# from batch to batch (and while writing a map, every token is a new
+# length), so a 202M model ran at 2.9 s per step instead of 0.2 s with the
+# GPU idle. The other attention kernels need no per-length plan.
+torch.backends.cuda.enable_cudnn_sdp(False)
+
 SIZES = {
     "tiny": dict(d=256, heads=4, enc=4, dec=4),
     "small": dict(d=384, heads=6, enc=6, dec=6),
