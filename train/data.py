@@ -86,14 +86,17 @@ class Windows:
         self.mels = {}
         for folder in folders:
             z = np.load(compile_dir(folder))
+            # Read each array once: every z[...] access decompresses the whole
+            # array again, and per-chart slices of separate copies kept them all.
             meta, off = json.loads(str(z["meta"])), z["offsets"]
+            all_ticks, all_toks, all_rots = z["ticks"], z["toks"], z["rots"]
             for i, m in enumerate(meta):
                 if song_split(m, holdout) != split:
                     continue
                 if (ranks and m["rank"] not in ranks) or (chars and m["char"] not in chars):
                     continue
                 a, b = off[i], off[i + 1]
-                self.items.append((folder, m, z["ticks"][a:b], z["toks"][a:b], z["rots"][a:b]))
+                self.items.append((folder, m, all_ticks[a:b], all_toks[a:b], all_rots[a:b]))
         self.weights = np.array([max(m["frames"], 1) for _, m, *_ in self.items], dtype=np.float64)
         self.cumulative = np.cumsum(self.weights) / max(self.weights.sum(), 1e-9)
         self.rng = random.Random(seed)
