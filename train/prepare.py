@@ -166,12 +166,19 @@ def disk_free_gb(path):
     return shutil.disk_usage(path).free / 1e9
 
 
-def run_pool(jobs, out, workers, max_minutes=0, min_free_gb=0):
+def folder_bytes(out):
+    return sum(e.stat().st_size for e in os.scandir(out) if e.is_file())
+
+
+def run_pool(jobs, out, workers, max_minutes=0, min_free_gb=0, max_gb=0):
     """Run the jobs with at most 2 x workers in flight; with max_minutes,
     stop starting new ones at the deadline and finish those under way. With
     min_free_gb, also stop when the disk gets that full: with the list sorted
     best first, a smaller disk then simply holds fewer, still the best, maps,
-    and training keeps room for its cache and checkpoints."""
+    and training keeps room for its cache and checkpoints. With max_gb, also
+    stop once the prepared data reaches that size: training reads it through
+    the page cache, and a machine whose memory cap is smaller than its data
+    ended its run (the job supervisor was killed) after an hour of training."""
     failed = open(os.path.join(out, "failed.jsonl"), "a")
     ok = skipped = bad = charts_done = 0
     start = time.time()
@@ -179,13 +186,16 @@ def run_pool(jobs, out, workers, max_minutes=0, min_free_gb=0):
     pending = iter(jobs)
     futures = {}
     i = 0
-    disk_full = False
+    disk_full = data_full = False
+    size = folder_bytes(out) if max_gb else 0
     with ProcessPoolExecutor(max_workers=workers) as pool:
         def room():
-            nonlocal disk_full
+            nonlocal disk_full, data_full
             if min_free_gb and not disk_full and disk_free_gb(out) < min_free_gb:
                 disk_full = True
-            return not disk_full
+            if max_gb and size >= max_gb * 1e9:
+                data_full = True
+            return not (disk_full or data_full)
 
         def top_up():
             while len(futures) < workers * 2 and (deadline is None or time.time() < deadline) and room():
@@ -206,6 +216,12 @@ def run_pool(jobs, out, workers, max_minutes=0, min_free_gb=0):
                 else:
                     ok += 1
                     charts_done += n
+                    if max_gb:
+                        for ext in (".json.gz", ".mel.npy"):
+                            try:
+                                size += os.path.getsize(os.path.join(out, key + ext))
+                            except OSError:
+                                pass
             except Exception as error:  # noqa: BLE001 - one bad map never stops the run
                 bad += 1
                 failed.write(json.dumps({"map": label, "error": f"{type(error).__name__}: {error}"[:300]}) + "\n")
@@ -214,7 +230,9 @@ def run_pool(jobs, out, workers, max_minutes=0, min_free_gb=0):
                 rate = i / max(time.time() - start, 1e-6)
                 print(f"{i}/{len(jobs)}: {ok} prepared ({charts_done} charts), {skipped} already there, {bad} failed; {rate:.2f} songs/s", flush=True)
             top_up()
-    if disk_full:
+    if data_full:
+        print(f"stopped at the {max_gb} GB data limit (the machine's memory) after {i} of {len(jobs)} songs", flush=True)
+    elif disk_full:
         print(f"stopped with {disk_free_gb(out):.1f} GB left on the disk after {i} of {len(jobs)} songs", flush=True)
     elif deadline is not None and time.time() >= deadline:
         print(f"stopped at the {max_minutes} minute limit after {i} of {len(jobs)} songs", flush=True)
@@ -254,6 +272,7 @@ def main():
     ap.add_argument("--limit", type=int, default=0)
     ap.add_argument("--max-minutes", type=float, default=0, help="stop starting new songs after this long")
     ap.add_argument("--min-free-gb", type=float, default=0, help="stop starting new songs when the disk has less free than this")
+    ap.add_argument("--max-gb", type=float, default=0, help="stop starting new songs once the prepared data reaches this size")
     ap.add_argument("--best-first", action="store_true", help="ranked, then curated, then highest rated first")
     a = ap.parse_args()
     out = a.out or os.path.join(ROOT, "library", "train", {"beatsaver": "beatsaver", "official": "official", "folder": "maps"}[a.source])
@@ -269,7 +288,7 @@ def main():
         jobs = [(folder_one, f, f) for f in a.folders]
     if a.limit:
         jobs = jobs[:a.limit]
-    ok, skipped, bad = run_pool(jobs, out, a.workers, a.max_minutes, a.min_free_gb)
+    ok, skipped, bad = run_pool(jobs, out, a.workers, a.max_minutes, a.min_free_gb, a.max_gb)
     print(f"done: {ok} prepared, {skipped} already there, {bad} failed -> {out}")
 
 

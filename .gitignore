@@ -22,3 +22,4 @@ bundle
 *.jpg
 !docs/*.png
 !docs/results/*.png
+train/run.env

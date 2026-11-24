@@ -158,6 +158,8 @@ def main():
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--max-minutes", type=float, default=0, help="stop after this long; the learning-rate schedule follows the clock")
     ap.add_argument("--save-minutes", type=float, default=0, help="also save last.pt this often")
+    ap.add_argument("--state", help="where resume.pt goes (model, optimizer, step, time used): default --out")
+    ap.add_argument("--resume", help="a resume.pt to continue from: same step, optimizer, learning-rate schedule and clock")
     a = ap.parse_args()
     os.makedirs(a.out, exist_ok=True)
     # The CPU side only cuts windows and launches kernels; a pool as wide as
@@ -175,8 +177,16 @@ def main():
     test = D.Windows(a.data, "test", a.holdout, ranks=ranks, chars=chars, seed=a.seed + 1, drop=test_songs)
     print(f"{len(train)} training charts, {len(test)} held-out charts; device {dev}", flush=True)
     model = MapModel(a.size)
-    start_step = 0
-    if a.init:
+    start_step, used, resumed = 0, 0.0, None
+    state_dir = a.state or a.out
+    os.makedirs(state_dir, exist_ok=True)
+    if a.resume:
+        resumed = torch.load(a.resume, map_location="cpu", weights_only=False)
+        model = MapModel(resumed["config"]["size"])
+        model.load_state_dict(resumed["model"])
+        start_step, used = resumed["step"], resumed["used"]
+        print(f"resuming from {a.resume}: step {start_step}, {used / 60:.1f} minutes of training used", flush=True)
+    elif a.init:
         ck = torch.load(a.init, map_location="cpu")
         model = MapModel(ck["config"]["size"])
         model.load_state_dict(ck["model"])
@@ -187,19 +197,29 @@ def main():
         model.mel_std.fill_(std)
     model.to(dev)
     print(f"model {model.config['size']}: {parameters_m(model):.1f} M parameters", flush=True)
-    a.batch = fit_batch(model, a.batch, dev)
+    a.batch = resumed["batch"] if resumed else fit_batch(model, a.batch, dev)
     print(f"batch {a.batch}", flush=True)
     opt = torch.optim.AdamW(model.parameters(), lr=a.lr, betas=(0.9, 0.98), weight_decay=0.01)
+    if resumed:
+        opt.load_state_dict(resumed["optimizer"])
     log = open(os.path.join(a.out, "log.jsonl"), "a")
-    best = math.inf
-    stream = batches(train, a.batch, a.seed, a.workers)
-    t0, seen, skipped = time.time(), 0, 0
-    last_save = t0
+    best = resumed["best"] if resumed else math.inf
+    stream = batches(train, a.batch, a.seed + start_step, a.workers)
+    # t0 is moved back by the training time already used, so the time box
+    # and the learning-rate schedule carry on where the earlier run stopped.
+    t0, seen, skipped = time.time() - used, 0, 0
+    t_seen = time.time()
+    last_save = time.time()
     model.train()
 
     def checkpoint(step, val=None):
         ck = {"model": model.state_dict(), "config": model.config, "step": step, "heldout": val, "args": vars(a)}
         torch.save(ck, os.path.join(a.out, "last.pt"))
+        # Everything needed to continue on another machine; written whole
+        # then renamed, so a copy taken mid-save is never half a file.
+        tmp = os.path.join(state_dir, "resume.pt.tmp")
+        torch.save({**ck, "optimizer": opt.state_dict(), "used": time.time() - t0, "best": best, "batch": a.batch}, tmp)
+        os.replace(tmp, os.path.join(state_dir, "resume.pt"))
         return ck
 
     for step in range(start_step + 1, a.steps + 1):
@@ -234,7 +254,7 @@ def main():
         opt.step()
         seen += mels.shape[0]
         if step % 50 == 0:
-            rate = seen / (time.time() - t0)
+            rate = seen / (time.time() - t_seen)
             print(f"step {step} loss {float(loss):.4f} lr {lr:.2e} {rate:.1f} windows/s", flush=True)
         out_of_time = a.max_minutes and progress >= 1.0
         if a.save_minutes and time.time() - last_save > a.save_minutes * 60:
@@ -246,10 +266,12 @@ def main():
             log.write(json.dumps(row) + "\n")
             log.flush()
             print(f"== step {step}: held-out loss {val:.4f}, note speed right {njs_acc:.0%}", flush=True)
+            improved = val < best
+            if improved:
+                best = val
             ck = checkpoint(step, val)
             last_save = time.time()
-            if val < best:
-                best = val
+            if improved:
                 torch.save(ck, os.path.join(a.out, "best.pt"))
         if out_of_time:
             print(f"stopped at the {a.max_minutes} minute limit, step {step}", flush=True)
