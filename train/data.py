@@ -103,7 +103,7 @@ def compile_dir(folder, workers=8):
 class Windows:
     """Random training windows over the charts of one or more prepared folders."""
 
-    def __init__(self, folders, split="train", holdout=0.02, ranks=None, chars=None, seed=0, test_songs=None):
+    def __init__(self, folders, split="train", holdout=0.02, ranks=None, chars=None, seed=0, test_songs=None, drop=None):
         self.items = []  # (folder, meta, ticks, toks, rots)
         self.mels = {}
         for folder in folders:
@@ -113,6 +113,8 @@ class Windows:
             meta, off = json.loads(str(z["meta"])), z["offsets"]
             all_ticks, all_toks, all_rots = z["ticks"], z["toks"], z["rots"]
             for i, m in enumerate(meta):
+                if drop and title_key(m.get("title", "")) in drop:
+                    continue
                 if song_split(m, holdout, test_songs) != split:
                     continue
                 if (ranks and m["rank"] not in ranks) or (chars and m["char"] not in chars):

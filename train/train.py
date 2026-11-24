@@ -142,7 +142,10 @@ def main():
     chars = set(a.chars.split(",")) if a.chars else None
     test_songs = D.read_test_songs(a.test_songs)
     train = D.Windows(a.data, "train", a.holdout, ranks=ranks, chars=chars, seed=a.seed, test_songs=test_songs)
-    test = D.Windows(a.data, "test", a.holdout, ranks=ranks, chars=chars, seed=a.seed + 1, test_songs=test_songs)
+    # The held-out loss (which picks best.pt) uses the hash-held-out songs
+    # only: choosing a checkpoint by its score on the test songs would leak
+    # them into the result.
+    test = D.Windows(a.data, "test", a.holdout, ranks=ranks, chars=chars, seed=a.seed + 1, drop=test_songs)
     print(f"{len(train)} training charts, {len(test)} held-out charts; device {dev}", flush=True)
     model = MapModel(a.size)
     start_step = 0
