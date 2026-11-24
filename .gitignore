@@ -1,0 +1,23 @@
+# Personal things never go in the repository: your settings, the index, the
+# files pulled or extracted from your copy of the game, community maps,
+# caches and exports (all of these live in config.json, index.json, library/).
+config.json
+index.json
+library/
+.venv/
+viewer/.godot/
+__pycache__/
+*.pyc
+.DS_Store
+# A second guard against song, map and game files anywhere in the tree.
+*.wav
+*.ogg
+*.egg
+*.mp3
+*.obb
+*.zip
+*.dat
+bundle
+*.png
+*.jpg
+!docs/*.png
