@@ -7,7 +7,8 @@
 # minutes and at the end. Settings (environment): PREP_MINUTES, MIN_FREE_GB
 # (preparing stops when the disk has this little left, so a small disk holds
 # the best maps that fit), TRAIN_MINUTES, SIZE, BATCH (the most; train.py
-# lowers it if the worst case does not fit the card), LR, WARMUP, EVAL_LIMIT,
+# lowers it if the worst case does not fit the card), LR, WARMUP, SAVE_MINUTES
+# (large checkpoints are about 0.8 GB, each one copied home), EVAL_LIMIT,
 # EVAL_SECONDS, WORKERS.
 set -u
 here=$(cd "$(dirname "$0")" && pwd)
@@ -16,7 +17,8 @@ data="${DATA_DIR:-$HOME/data/beatsaver}"
 mkdir -p "$out" "$data"
 cd "$here/.."
 # CPUs the container may use: its cgroup quota (nproc and os.cpu_count can
-# report 1 or the whole host instead), capped at 16 workers.
+# report 1 or the whole host instead), capped at 24 workers so the downloads
+# stay a modest load on BeatSaver's server.
 cpus=$(python3 - <<'PY'
 import os
 def quota():
@@ -32,7 +34,7 @@ def quota():
 print(max(1, int(quota())))
 PY
 )
-workers="${WORKERS:-$(( cpus < 16 ? cpus : 16 ))}"
+workers="${WORKERS:-$(( cpus < 24 ? cpus : 24 ))}"
 started=$(date +%s)
 limit=""; command -v timeout >/dev/null && limit="timeout ${EVAL_SECONDS:-360}"
 stamp() { echo "[$(( $(date +%s) - started ))s] $*" | tee -a "$out/timeline.txt"; }
@@ -66,7 +68,7 @@ if [ "$songs" -lt "${MIN_SONGS:-50}" ]; then
 fi
 stamp "training for ${TRAIN_MINUTES:-22} minutes"
 python3 -I train/train.py --data "$data" --out "$out/run" --size "${SIZE:-small}" --steps 1000000 --batch "${BATCH:-64}" \
-  --lr "${LR:-4e-4}" --warmup "${WARMUP:-500}" --workers 8 --eval-every 1500 --max-minutes "${TRAIN_MINUTES:-22}" --save-minutes 4 > "$out/train.log" 2>&1
+  --lr "${LR:-4e-4}" --warmup "${WARMUP:-500}" --workers 8 --eval-every 1500 --max-minutes "${TRAIN_MINUTES:-22}" --save-minutes "${SAVE_MINUTES:-4}" > "$out/train.log" 2>&1
 grep -E '^(==|stopped|done|model|batch [0-9]|[0-9]+ training)' "$out/train.log" | tail -7
 stamp "scoring held-out maps"
 $limit python3 -I train/evaluate.py --ckpt "$out/run/best.pt" --data "$data" --limit "${EVAL_LIMIT:-8}" \
