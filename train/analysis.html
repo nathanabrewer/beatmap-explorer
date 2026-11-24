@@ -1,0 +1,677 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Map makers compared</title>
+<style>
+.viz-root {
+  color-scheme: light;
+  --page: #f9f9f7; --surface-1: #fcfcfb; --surface-2: #f3f2ee;
+  --text-primary: #0b0b0b; --text-secondary: #52514e; --text-muted: #898781;
+  --grid: #e1e0d9; --axis: #c3c2b7; --border: rgba(11,11,11,0.10);
+  --ref: #52514e; --band: rgba(42,120,214,0.08); --accent: #2a78d6;
+  --s1: #2a78d6; --s2: #eb6834; --s3: #1baf7a; --s4: #eda100; --s5: #e87ba4; --s6: #008300; --s7: #6250d6; --s8: #e34948;
+  --div-lo: #2a78d6; --div-mid: #f0efec; --div-hi: #e34948;
+  --seq-lo: #cde2fb; --seq-hi: #104281;
+}
+:root[data-theme="dark"] .viz-root {
+  color-scheme: dark;
+  --page: #0d0d0d; --surface-1: #1a1a19; --surface-2: #232321;
+  --text-primary: #f0efec; --text-secondary: #c3c2b7; --text-muted: #898781;
+  --grid: #2c2c2a; --axis: #383835; --border: rgba(255,255,255,0.10);
+  --ref: #c3c2b7; --band: rgba(57,135,229,0.12); --accent: #3987e5;
+  --s1: #3987e5; --s2: #d95926; --s3: #199e70; --s4: #c98500; --s5: #d55181; --s6: #0ca30c; --s7: #9085e9; --s8: #e66767;
+  --div-lo: #3987e5; --div-mid: #383835; --div-hi: #e66767;
+  --seq-lo: #1c2636; --seq-hi: #86b6ef;
+}
+* { box-sizing: border-box; }
+body { margin: 0; }
+.viz-root { background: var(--page); color: var(--text-primary); font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; min-height: 100vh; }
+a { color: inherit; }
+header.top { padding: 28px 32px 12px; margin-left: 240px; }
+header.top h1 { margin: 0 0 4px; font-size: 26px; font-weight: 650; letter-spacing: -0.01em; }
+header.top p { margin: 0; color: var(--text-secondary); max-width: 900px; }
+nav.side { position: fixed; top: 0; left: 0; bottom: 0; width: 240px; padding: 24px 16px; border-right: 1px solid var(--border); background: var(--surface-1); overflow-y: auto; }
+nav.side .brand { font-weight: 650; margin-bottom: 16px; }
+nav.side a { display: block; padding: 6px 10px; border-radius: 6px; text-decoration: none; color: var(--text-secondary); }
+nav.side a:hover, nav.side a.on { background: var(--surface-2); color: var(--text-primary); }
+nav.side .theme { margin-top: 20px; display: flex; gap: 6px; }
+nav.side .theme button { flex: 1; }
+.filters { position: sticky; top: 0; z-index: 5; display: flex; gap: 16px; align-items: center; flex-wrap: wrap; padding: 10px 32px; margin-left: 240px; background: var(--page); border-bottom: 1px solid var(--border); }
+.filters label { color: var(--text-secondary); font-size: 13px; display: flex; gap: 8px; align-items: center; }
+select, button { font: inherit; color: var(--text-primary); background: var(--surface-1); border: 1px solid var(--border); border-radius: 6px; padding: 5px 10px; }
+button { cursor: pointer; }
+button:hover { background: var(--surface-2); }
+main { padding: 8px 32px 64px; margin-left: 240px; }
+section { margin: 28px 0 8px; scroll-margin-top: 64px; }
+section > h2 { font-size: 19px; margin: 0 0 4px; font-weight: 650; }
+section > p.lede { margin: 0 0 14px; color: var(--text-secondary); max-width: 920px; }
+.grid { display: grid; gap: 16px; }
+.g2 { grid-template-columns: repeat(auto-fit, minmax(420px, 1fr)); }
+.g3 { grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); }
+.card { background: var(--surface-1); border: 1px solid var(--border); border-radius: 10px; padding: 14px 16px 12px; min-width: 0; }
+.card h3 { margin: 0; font-size: 15px; font-weight: 600; }
+.card .sub { margin: 2px 0 8px; color: var(--text-secondary); font-size: 13px; }
+.card .head { display: flex; justify-content: space-between; gap: 12px; align-items: flex-start; }
+.card .tv { font-size: 12px; padding: 3px 8px; color: var(--text-secondary); white-space: nowrap; }
+.tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 12px; }
+.tile .label { color: var(--text-secondary); font-size: 13px; }
+.tile .value { font-size: 28px; font-weight: 600; margin-top: 2px; }
+.tile .delta { font-size: 13px; color: var(--text-secondary); }
+.hero .value { font-size: 48px; line-height: 1.05; }
+.legend { display: flex; flex-wrap: wrap; gap: 6px 14px; margin: 4px 0 6px; font-size: 13px; color: var(--text-secondary); }
+.legend .item { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; user-select: none; }
+.legend .item.off { opacity: 0.35; }
+.legend .key { width: 14px; height: 3px; border-radius: 2px; display: inline-block; }
+.legend .sw { width: 10px; height: 10px; border-radius: 3px; display: inline-block; }
+svg { display: block; overflow: visible; }
+svg text { fill: var(--text-muted); font-size: 11px; font-variant-numeric: tabular-nums; }
+svg .lbl { fill: var(--text-secondary); font-size: 12px; }
+svg .val { fill: var(--text-primary); font-size: 12px; font-weight: 600; }
+svg .gridl { stroke: var(--grid); stroke-width: 1; }
+svg .axisl { stroke: var(--axis); stroke-width: 1; }
+svg .hit { fill: transparent; }
+svg .mark:hover, svg .mark.hot { filter: brightness(1.18); }
+table.data { border-collapse: collapse; width: 100%; font-size: 13px; font-variant-numeric: tabular-nums; }
+table.data th, table.data td { text-align: right; padding: 5px 8px; border-bottom: 1px solid var(--border); }
+table.data th:first-child, table.data td:first-child { text-align: left; }
+table.data th { color: var(--text-secondary); font-weight: 600; position: sticky; top: 0; background: var(--surface-1); }
+.tablewrap { max-height: 360px; overflow: auto; margin-top: 8px; }
+.heat td.cell { text-align: center; font-weight: 600; cursor: pointer; border: 2px solid var(--surface-1); border-radius: 4px; }
+.heat th.song { writing-mode: vertical-rl; transform: rotate(180deg); text-align: left; height: 120px; white-space: nowrap; font-weight: 500; cursor: pointer; }
+.heat th.song.on { color: var(--text-primary); text-decoration: underline; }
+#tip { position: fixed; pointer-events: none; z-index: 50; background: var(--surface-1); border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; font-size: 12px; box-shadow: 0 6px 24px rgba(0,0,0,0.25); display: none; max-width: 340px; }
+#tip .t { color: var(--text-secondary); margin-bottom: 4px; }
+#tip .r { display: flex; align-items: center; gap: 8px; }
+#tip .r b { font-variant-numeric: tabular-nums; min-width: 48px; display: inline-block; }
+#tip .k { width: 12px; height: 2px; border-radius: 1px; display: inline-block; }
+.notes li { margin: 4px 0; color: var(--text-secondary); }
+.pending { color: var(--text-muted); font-style: italic; }
+.strip-controls { display: flex; gap: 8px; align-items: center; margin: 6px 0; }
+.strip-controls input[type=range] { flex: 1; }
+.scale { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--text-muted); margin-top: 6px; }
+.scale .bar { width: 160px; height: 8px; border-radius: 4px; }
+@media (max-width: 900px) { nav.side { display: none; } header.top, .filters, main { margin-left: 0; padding-left: 16px; padding-right: 16px; } }
+</style>
+</head>
+<body>
+<div class="viz-root" id="root">
+<nav class="side" aria-label="Sections">
+  <div class="brand">Map makers compared</div>
+  <a href="#overview">Overview</a>
+  <a href="#leaderboard">Leaderboard</a>
+  <a href="#allmetrics">All metrics</a>
+  <a href="#songs">Song by song</a>
+  <a href="#timing">Timing</a>
+  <a href="#snapping">Onset snapping</a>
+  <a href="#detail">One song up close</a>
+  <a href="#training">Training</a>
+  <a href="#speed">Speed</a>
+  <a href="#notes">How to read this</a>
+  <div class="theme"><button data-t="light">Light</button><button data-t="dark">Dark</button></div>
+</nav>
+<header class="top"><h1 id="title"></h1><p id="subtitle"></p></header>
+<div class="filters" role="group" aria-label="Filters">
+  <label>Song <select id="f-song"></select></label>
+  <label>Difficulty <select id="f-diff"></select></label>
+  <label>Metric <select id="f-metric"></select></label>
+  <span id="f-count" style="color:var(--text-muted);font-size:13px"></span>
+</div>
+<main>
+  <section id="overview"><h2>Overview</h2><p class="lede" id="overview-lede"></p><div class="tiles" id="tiles"></div></section>
+  <section id="leaderboard"><h2>Leaderboard</h2><p class="lede">Mean over the selected songs and difficulties. Every method is scored by the same code against the real maps. Hover a bar for the spread.</p><div class="card" id="c-board"></div></section>
+  <section id="allmetrics"><h2>All metrics at a glance</h2><p class="lede">The same means for every metric. Timing, colour, placement and cut: higher is better. Density: 1.0 means as many notes as the real map. Swing errors: lower is better (the real maps' own rate is the reference line).</p><div class="grid g3" id="c-multi"></div></section>
+  <section id="songs"><h2>Song by song</h2><p class="lede">The selected metric for every song and method (difficulties averaged unless one is selected). Click a song to inspect it below.</p><div class="card" id="c-heat"></div></section>
+  <section id="timing"><h2>Timing</h2><p class="lede">How far each generated note is from the nearest real note. A score counts a note as on time within 30 ms (the shaded band). A method whose whole map is early or late shows a shifted peak and a best shift away from zero.</p>
+    <div class="card" id="c-offsets"></div>
+    <div class="grid g2" style="margin-top:16px"><div class="card" id="c-shift"></div><div class="card" id="c-pr"></div></div></section>
+  <section id="snapping"><h2>Onset snapping</h2><p class="lede">Moving each generated note to the nearest onset in the audio, if one is within the window. A clean-up step, not the model: it shows how much of the timing gap is precision rather than choosing the wrong moments.</p>
+    <div class="grid g2"><div class="card" id="c-snap"></div><div class="card" id="c-snapsong"></div></div></section>
+  <section id="detail"><h2>One song up close</h2><p class="lede" id="detail-lede"></p>
+    <div class="card" id="c-density"></div>
+    <div class="card" id="c-strip" style="margin-top:16px"></div>
+    <div class="card" id="c-songtable" style="margin-top:16px"></div></section>
+  <section id="training"><h2>Training</h2><p class="lede">Held-out loss (on BeatSaver songs each run never trained on) over training time. Lower is better. Runs with different data sizes hold out different songs, so compare shapes more than exact values.</p>
+    <div class="grid g2"><div class="card" id="c-loss"></div><div class="card" id="c-njs"></div></div></section>
+  <section id="speed"><h2>Speed</h2><p class="lede">Compute time to write maps, as measured.</p><div class="grid g2"><div class="card" id="c-speed"></div><div class="card" id="c-gen"></div></div></section>
+  <section id="notes"><h2>How to read this</h2><div class="card"><ul class="notes" id="notes-list"></ul></div></section>
+</main>
+<div id="tip" role="tooltip"></div>
+</div>
+<script>
+const DATA = "__DATA__";
+const NS = "http://www.w3.org/2000/svg";
+const METRICS = [
+  {id: "timingF1", name: "Timing F1", fmt: v => v.toFixed(2), better: "high", max: 1, about: "notes at the right moments (within 30 ms), colour ignored"},
+  {id: "colourF1", name: "Colour F1", fmt: v => v.toFixed(2), better: "high", max: 1, about: "the right hand at the right moment"},
+  {id: "place", name: "Placement", fmt: v => v.toFixed(2), better: "high", max: 1, about: "of the on-time notes, share in the right lane and row"},
+  {id: "cut", name: "Cut direction", fmt: v => v.toFixed(2), better: "high", max: 1, about: "of the on-time notes, share with the right cut"},
+  {id: "density", name: "Density ratio", fmt: v => "×" + v.toFixed(2), better: "one", about: "generated notes / real notes (1.0 = the same)"},
+  {id: "swingErrors", name: "Swing errors", fmt: v => v.toFixed(1), better: "low", about: "per 100 notes: a hand swinging the same way twice within 0.5 s"},
+];
+const DIFF_NAMES = {Expert: "Expert", ExpertPlus: "Expert+"};
+const state = {song: "all", diff: "all", metric: "timingF1", off: new Set(), stripStart: 30, detailSong: null};
+const $ = id => document.getElementById(id);
+function el(tag, attrs = {}, text) {
+  const e = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs)) e.setAttribute(k, v);
+  if (text !== undefined) e.textContent = text;
+  return e;
+}
+function sv(tag, attrs = {}, text) {
+  const e = document.createElementNS(NS, tag);
+  for (const [k, v] of Object.entries(attrs)) e.setAttribute(k, v);
+  if (text !== undefined) e.textContent = text;
+  return e;
+}
+const css = name => getComputedStyle($("root")).getPropertyValue(name).trim();
+const color = m => `var(--s${m.slot})`;
+const methodsById = Object.fromEntries(DATA.methods.map(m => [m.id, m]));
+const songsByKey = Object.fromEntries(DATA.songs.map(s => [s.key, s]));
+const metric = () => METRICS.find(m => m.id === state.metric);
+const mean = a => a.length ? a.reduce((x, y) => x + y, 0) / a.length : NaN;
+const median = a => { if (!a.length) return NaN; const b = [...a].sort((x, y) => x - y); const i = b.length >> 1; return b.length % 2 ? b[i] : (b[i - 1] + b[i]) / 2; };
+
+// ---------- tooltip ----------
+const tip = $("tip");
+function showTip(ev, title, rows) {
+  tip.replaceChildren();
+  if (title) tip.append(el("div", {class: "t"}, title));
+  for (const r of rows) {
+    const row = el("div", {class: "r"});
+    if (r.color) { const k = el("span", {class: "k"}); k.style.background = r.color; row.append(k); }
+    row.append(el("b", {}, r.value));
+    row.append(el("span", {}, r.label || ""));
+    tip.append(row);
+  }
+  tip.style.display = "block";
+  const x = Math.min(ev.clientX + 14, window.innerWidth - tip.offsetWidth - 8);
+  const y = Math.min(ev.clientY + 14, window.innerHeight - tip.offsetHeight - 8);
+  tip.style.left = x + "px"; tip.style.top = y + "px";
+}
+const hideTip = () => { tip.style.display = "none"; };
+
+// ---------- data slices ----------
+function rowsFor({song = state.song, diff = state.diff, method} = {}) {
+  return DATA.rows.filter(r => (song === "all" || r.s === song) && (diff === "all" || r.d === diff) && (!method || r.m === method));
+}
+function realSwing({song = state.song, diff = state.diff} = {}) {
+  const v = [];
+  for (const [k, r] of Object.entries(DATA.real)) { const [s, d] = k.split("|"); if ((song === "all" || s === song) && (diff === "all" || d === diff)) v.push(r.swingErrors); }
+  return mean(v);
+}
+function methodStats(mid, metricId, opts) {
+  const v = rowsFor({...opts, method: mid}).map(r => r.sc[metricId]);
+  return {mean: mean(v), median: median(v), min: Math.min(...v), max: Math.max(...v), n: v.length};
+}
+function ranked(metricId, opts) {
+  const m = METRICS.find(x => x.id === metricId);
+  const list = DATA.methods.map(x => ({m: x, st: methodStats(x.id, metricId, opts)}));
+  const key = s => isNaN(s.mean) ? Infinity : m.better === "high" ? -s.mean : m.better === "low" ? s.mean : Math.abs(Math.log(s.mean));
+  return list.sort((a, b) => key(a.st) - key(b.st));
+}
+
+// ---------- card scaffolding ----------
+function card(id, title, sub, tableFn) {
+  const c = $(id); c.replaceChildren();
+  const head = el("div", {class: "head"});
+  const left = el("div");
+  left.append(el("h3", {}, title));
+  if (sub) left.append(el("p", {class: "sub"}, sub));
+  head.append(left);
+  const body = el("div");
+  let tw = null;
+  if (tableFn) {
+    const b = el("button", {class: "tv", "aria-expanded": "false"}, "Table");
+    b.onclick = () => {
+      if (tw) { tw.remove(); tw = null; b.textContent = "Table"; b.setAttribute("aria-expanded", "false"); return; }
+      tw = el("div", {class: "tablewrap"}); tw.append(tableFn()); c.append(tw); b.textContent = "Hide table"; b.setAttribute("aria-expanded", "true");
+    };
+    head.append(b);
+  }
+  c.append(head, body);
+  return body;
+}
+function table(headers, rows) {
+  const t = el("table", {class: "data"});
+  const tr = el("tr"); headers.forEach(h => tr.append(el("th", {}, h)));
+  const thead = el("thead"); thead.append(tr); t.append(thead);
+  const tb = el("tbody");
+  for (const r of rows) { const row = el("tr"); r.forEach(v => row.append(el("td", {}, v))); tb.append(row); }
+  t.append(tb);
+  return t;
+}
+function legend(items, toggle) {
+  const L = el("div", {class: "legend"});
+  for (const it of items) {
+    const i = el("span", {class: "item" + (state.off.has(it.id) ? " off" : ""), role: toggle ? "button" : null, tabindex: toggle ? "0" : null});
+    const k = el("span", {class: it.shape === "rect" ? "sw" : "key"}); k.style.background = it.color;
+    i.append(k, document.createTextNode(it.name));
+    if (toggle) {
+      const flip = () => { state.off.has(it.id) ? state.off.delete(it.id) : state.off.add(it.id); renderAll(); };
+      i.onclick = flip; i.onkeydown = e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); flip(); } };
+    }
+    L.append(i);
+  }
+  return L;
+}
+function width(node, fallback = 600) { return Math.max(260, (node.clientWidth || node.parentElement.clientWidth || fallback)); }
+function fit(text, px) { const n = Math.max(6, Math.floor(px / 6.6)); return text.length > n ? text.slice(0, n - 1) + "…" : text; }
+function niceTicks(lo, hi, n = 5) {
+  const span = hi - lo || 1, step0 = span / n, mag = Math.pow(10, Math.floor(Math.log10(step0)));
+  const step = [1, 2, 2.5, 5, 10].map(s => s * mag).find(s => span / s <= n) || 10 * mag;
+  const out = []; for (let v = Math.ceil(lo / step) * step; v <= hi + 1e-9; v += step) out.push(+v.toFixed(10));
+  return out;
+}
+
+// ---------- horizontal bar chart ----------
+function hbars(body, items, opts) {
+  const W = width(body), labelW = Math.min(230, Math.max(120, W * 0.42)), rowH = 30, top = 6, H = top + items.length * rowH + 22;
+  const xmax = opts.max || Math.max(...items.filter(i => !isNaN(i.value)).map(i => i.value), opts.ref || 0) * 1.12 || 1;
+  const x = v => labelW + (W - labelW - 56) * (v / xmax);
+  const s = sv("svg", {width: W, height: H, role: "img", "aria-label": opts.aria || "bar chart"});
+  for (const t of niceTicks(0, xmax, 5)) { s.append(sv("line", {class: "gridl", x1: x(t), x2: x(t), y1: top, y2: H - 18})); s.append(sv("text", {x: x(t), y: H - 4, "text-anchor": "middle"}, opts.tick ? opts.tick(t) : t)); }
+  s.append(sv("line", {class: "axisl", x1: x(0), x2: x(0), y1: top, y2: H - 18}));
+  if (opts.ref !== undefined && !isNaN(opts.ref)) {
+    s.append(sv("line", {x1: x(opts.ref), x2: x(opts.ref), y1: top, y2: H - 18, stroke: "var(--ref)", "stroke-width": 1.5}));
+    s.append(sv("text", {x: x(opts.ref) + 4, y: top + 10, class: "lbl"}, opts.refLabel || ""));
+  }
+  items.forEach((it, i) => {
+    const y = top + i * rowH, cy = y + rowH / 2;
+    const name = sv("text", {x: labelW - 10, y: cy + 4, "text-anchor": "end", class: "lbl"}, fit(it.name, labelW - 14));
+    name.append(sv("title", {}, it.name));
+    s.append(name);
+    if (isNaN(it.value)) { s.append(sv("text", {x: x(0) + 6, y: cy + 4, class: "lbl", "font-style": "italic"}, "pending")); return; }
+    const w = Math.max(1, x(it.value) - x(0)), bh = Math.min(18, rowH - 10);
+    const path = `M${x(0)},${cy - bh / 2} h${Math.max(0, w - 4)} a4,4 0 0 1 4,4 v${bh - 8} a4,4 0 0 1 -4,4 h${-Math.max(0, w - 4)} z`;
+    const bar = sv("path", {d: path, fill: it.color, class: "mark"});
+    s.append(bar);
+    s.append(sv("text", {x: x(0) + w + 6, y: cy + 4, class: "val"}, opts.fmt(it.value)));
+    const hit = sv("rect", {x: labelW - 4, y: y + 1, width: W - labelW, height: rowH - 2, class: "hit", tabindex: 0});
+    const tipRows = () => it.tip || [{value: opts.fmt(it.value), label: it.name, color: it.color}];
+    hit.addEventListener("pointermove", e => { bar.classList.add("hot"); showTip(e, it.name, tipRows()); });
+    hit.addEventListener("pointerleave", () => { bar.classList.remove("hot"); hideTip(); });
+    hit.addEventListener("focus", e => { const r = hit.getBoundingClientRect(); showTip({clientX: r.right - 80, clientY: r.top}, it.name, tipRows()); });
+    hit.addEventListener("blur", hideTip);
+    s.append(hit);
+  });
+  body.append(s);
+}
+
+// ---------- line chart with crosshair ----------
+function lines(body, series, opts) {
+  const W = width(body), H = opts.height || 260, L = 46, R = 14, T = 10, B = 28;
+  const shown = series.filter(s => !state.off.has(s.id) && s.points.length);
+  const xs = shown.flatMap(s => s.points.map(p => p[0])), ys = shown.flatMap(s => s.points.map(p => p[1]));
+  const x0 = opts.xmin ?? Math.min(...xs), x1 = opts.xmax ?? Math.max(...xs);
+  const y0 = opts.ymin ?? Math.min(0, ...ys), y1 = opts.ymax ?? (Math.max(...ys) * 1.08 || 1);
+  const X = v => L + (W - L - R) * (v - x0) / ((x1 - x0) || 1), Y = v => T + (H - T - B) * (1 - (v - y0) / ((y1 - y0) || 1));
+  const s = sv("svg", {width: W, height: H, role: "img", "aria-label": opts.aria || "line chart"});
+  for (const t of niceTicks(y0, y1, 4)) { s.append(sv("line", {class: "gridl", x1: L, x2: W - R, y1: Y(t), y2: Y(t)})); s.append(sv("text", {x: L - 6, y: Y(t) + 4, "text-anchor": "end"}, opts.ytick ? opts.ytick(t) : t)); }
+  for (const t of niceTicks(x0, x1, 6)) s.append(sv("text", {x: X(t), y: H - 8, "text-anchor": "middle"}, opts.xtick ? opts.xtick(t) : t));
+  s.append(sv("line", {class: "axisl", x1: L, x2: W - R, y1: H - B, y2: H - B}));
+  if (opts.xlabel) s.append(sv("text", {x: W - R, y: H - B - 6, "text-anchor": "end"}, opts.xlabel));
+  for (const se of shown) {
+    if (se.area) s.append(sv("path", {d: `M${X(se.points[0][0])},${Y(y0)} ` + se.points.map(p => `L${X(p[0])},${Y(p[1])}`).join(" ") + ` L${X(se.points[se.points.length - 1][0])},${Y(y0)} Z`, fill: se.color, opacity: 0.1}));
+    s.append(sv("path", {d: se.points.map((p, i) => `${i ? "L" : "M"}${X(p[0])},${Y(p[1])}`).join(" "), fill: "none", stroke: se.color, "stroke-width": se.width || 2, "stroke-linejoin": "round", "stroke-linecap": "round"}));
+    if (se.dots) for (const p of se.points) s.append(sv("circle", {cx: X(p[0]), cy: Y(p[1]), r: 4, fill: se.color, stroke: "var(--surface-1)", "stroke-width": 2}));
+    if (opts.endLabels) { const p = se.points[se.points.length - 1]; s.append(sv("text", {x: X(p[0]) + 6, y: Y(p[1]) + 4, class: "lbl"}, se.short || "")); }
+  }
+  const cross = sv("line", {x1: 0, x2: 0, y1: T, y2: H - B, stroke: "var(--axis)", "stroke-width": 1, visibility: "hidden"});
+  s.append(cross);
+  const hit = sv("rect", {x: L, y: T, width: W - L - R, height: H - T - B, class: "hit"});
+  hit.addEventListener("pointermove", e => {
+    const r = s.getBoundingClientRect(), xv = x0 + (e.clientX - r.left - L) / (W - L - R) * (x1 - x0);
+    const rows = [];
+    let snapX = xv;
+    for (const se of shown) {
+      let best = se.points[0];
+      for (const p of se.points) if (Math.abs(p[0] - xv) < Math.abs(best[0] - xv)) best = p;
+      snapX = best[0];
+      rows.push({value: opts.yfmt ? opts.yfmt(best[1]) : best[1].toFixed(2), label: se.name, color: se.color});
+    }
+    cross.setAttribute("x1", X(snapX)); cross.setAttribute("x2", X(snapX)); cross.setAttribute("visibility", "visible");
+    showTip(e, opts.xfmt ? opts.xfmt(snapX) : String(snapX), rows);
+  });
+  hit.addEventListener("pointerleave", () => { cross.setAttribute("visibility", "hidden"); hideTip(); });
+  s.append(hit);
+  body.append(s);
+}
+
+// ---------- sections ----------
+function renderFilters() {
+  const fs = $("f-song"), fd = $("f-diff"), fm = $("f-metric");
+  if (!fs.options.length) {
+    fs.append(el("option", {value: "all"}, `All ${DATA.songs.length} test songs`));
+    for (const s of [...DATA.songs].sort((a, b) => a.title.localeCompare(b.title))) fs.append(el("option", {value: s.key}, s.title));
+    fd.append(el("option", {value: "all"}, "Expert and Expert+"));
+    for (const d of DATA.difficulties) fd.append(el("option", {value: d}, DIFF_NAMES[d] || d));
+    for (const m of METRICS) fm.append(el("option", {value: m.id}, m.name));
+    fs.onchange = () => { state.song = fs.value; if (fs.value !== "all") state.detailSong = fs.value; renderAll(); };
+    fd.onchange = () => { state.diff = fd.value; renderAll(); };
+    fm.onchange = () => { state.metric = fm.value; renderAll(); };
+  }
+  fs.value = state.song; fd.value = state.diff; fm.value = state.metric;
+  $("f-count").textContent = `${rowsFor().length} maps in view`;
+}
+
+function renderOverview() {
+  $("title").textContent = DATA.title;
+  $("subtitle").textContent = DATA.subtitle + (DATA.built ? ` Built ${DATA.built}.` : "");
+  const r = ranked("timingF1");
+  const ready = DATA.methods.filter(m => !m.pending);
+  const best = r.find(x => !isNaN(x.st.mean));
+  const ours = r.filter(x => !isNaN(x.st.mean) && !["inferno", "mapgen"].includes(x.m.id));
+  const inferno = r.find(x => x.m.id === "inferno"), mapgen = r.find(x => x.m.id === "mapgen");
+  $("overview-lede").textContent = `${DATA.songs.length} official songs that no map in our BeatSaver training list covers, Expert and Expert+, ${DATA.rows.length} generated maps across ${ready.length} methods` + (DATA.methods.length > ready.length ? ` (${DATA.methods.length - ready.length} still pending).` : ".");
+  const T = $("tiles"); T.replaceChildren();
+  const tile = (label, value, delta, hero) => { const t = el("div", {class: "card tile" + (hero ? " hero" : "")}); t.append(el("div", {class: "label"}, label), el("div", {class: "value"}, value)); if (delta) t.append(el("div", {class: "delta"}, delta)); T.append(t); };
+  if (best) tile(`Best timing F1 · ${best.m.name}`, best.st.mean.toFixed(2), `mean of ${best.st.n} maps, ${state.song === "all" ? "all songs" : songsByKey[state.song].title}`, true);
+  if (ours.length) tile(`Best of ours · ${ours[0].m.name}`, ours[0].st.mean.toFixed(2), "timing F1");
+  if (inferno && !isNaN(inferno.st.mean)) tile("InfernoSaber", inferno.st.mean.toFixed(2), "timing F1 (given the real note density)");
+  if (mapgen && !isNaN(mapgen.st.mean)) tile("mapgen (rules)", mapgen.st.mean.toFixed(2), "timing F1");
+  tile("Test songs", String(state.song === "all" ? DATA.songs.length : 1), `${rowsFor().length} maps in view`);
+}
+
+function renderBoard() {
+  const M = metric();
+  const body = card("c-board", `${M.name}, by method`, M.about, () => table(["Method", "Mean", "Median", "Lowest", "Highest", "Maps"],
+    ranked(M.id).map(x => [x.m.name, isNaN(x.st.mean) ? "pending" : M.fmt(x.st.mean), isNaN(x.st.median) ? "" : M.fmt(x.st.median), x.st.n ? M.fmt(x.st.min) : "", x.st.n ? M.fmt(x.st.max) : "", x.st.n])));
+  const items = ranked(M.id).map(x => ({name: x.m.name, color: color(x.m), value: x.st.mean,
+    tip: [{value: M.fmt(x.st.mean), label: "mean"}, {value: isNaN(x.st.median) ? "" : M.fmt(x.st.median), label: "median"}, {value: x.st.n ? `${M.fmt(x.st.min)} – ${M.fmt(x.st.max)}` : "", label: "range"}, {value: String(x.st.n), label: "maps"}].concat(x.m.note ? [{value: "", label: x.m.note}] : [])}));
+  const opts = {fmt: M.fmt, max: M.max, aria: `${M.name} by method`};
+  if (M.id === "density") { opts.ref = 1; opts.refLabel = "real map"; opts.tick = t => "×" + t; }
+  if (M.id === "swingErrors") { opts.ref = realSwing(); opts.refLabel = "real maps"; }
+  hbars(body, items, opts);
+}
+
+function renderMulti() {
+  const host = $("c-multi"); host.replaceChildren();
+  for (const M of METRICS) host.append(el("div", {class: "card", id: "m-" + M.id}));
+  for (const M of METRICS) {
+    const body = card("m-" + M.id, M.name, M.about, () => table(["Method", "Mean"], ranked(M.id).map(x => [x.m.name, isNaN(x.st.mean) ? "pending" : M.fmt(x.st.mean)])));
+    const items = ranked(M.id).filter(x => !isNaN(x.st.mean)).map(x => ({name: x.m.name, color: color(x.m), value: x.st.mean}));
+    const opts = {fmt: M.fmt, max: M.max};
+    if (M.id === "density") { opts.ref = 1; opts.refLabel = "real"; }
+    if (M.id === "swingErrors") { opts.ref = realSwing(); opts.refLabel = "real"; }
+    hbars(body, items, opts);
+  }
+}
+
+function heatColor(M, v, lo, hi) {
+  if (isNaN(v)) return ["transparent", "var(--text-muted)"];
+  const mix = (a, b, t) => `color-mix(in oklab, ${a} ${Math.round((1 - t) * 100)}%, ${b})`;
+  if (M.id === "density") {
+    const t = Math.max(-1, Math.min(1, Math.log2(v)));
+    const bg = t < 0 ? mix("var(--div-mid)", "var(--div-lo)", -t) : mix("var(--div-mid)", "var(--div-hi)", t);
+    return [bg, Math.abs(t) > 0.55 ? "#ffffff" : "var(--text-primary)"];
+  }
+  const t = Math.max(0, Math.min(1, (v - lo) / ((hi - lo) || 1)));
+  const dark = document.documentElement.dataset.theme === "dark";
+  return [mix("var(--seq-lo)", "var(--seq-hi)", t), (dark ? t < 0.55 : t > 0.55) ? (dark ? "#f0efec" : "#ffffff") : (dark ? "#0b0b0b" : "#0b0b0b")];
+}
+function renderHeat() {
+  const M = metric();
+  const songs = [...DATA.songs].sort((a, b) => a.title.localeCompare(b.title));
+  const methods = DATA.methods.filter(m => !m.pending);
+  const val = (m, s) => mean(rowsFor({song: s.key, method: m.id}).map(r => r.sc[M.id]));
+  const all = methods.flatMap(m => songs.map(s => val(m, s))).filter(v => !isNaN(v));
+  const lo = M.max ? 0 : Math.min(...all), hi = M.max ? 1 : Math.max(...all);
+  const body = card("c-heat", `${M.name} for every song`, state.diff === "all" ? "Expert and Expert+ averaged" : DIFF_NAMES[state.diff], () => table(["Method", ...songs.map(s => s.title)], methods.map(m => [m.name, ...songs.map(s => { const v = val(m, s); return isNaN(v) ? "" : M.fmt(v); })])));
+  const wrap = el("div", {style: "overflow-x:auto"});
+  const t = el("table", {class: "data heat"});
+  const hr = el("tr"); hr.append(el("th", {}, ""));
+  for (const s of songs) { const th = el("th", {class: "song" + (state.detailSong === s.key ? " on" : ""), title: s.title}, s.title.length > 26 ? s.title.slice(0, 25) + "…" : s.title); th.onclick = () => selectDetail(s.key); hr.append(th); }
+  hr.append(el("th", {}, "Mean"));
+  t.append(hr);
+  for (const m of methods) {
+    const tr = el("tr");
+    const th = el("td", {}); const sw = el("span", {class: "sw", style: `display:inline-block;width:10px;height:10px;border-radius:3px;margin-right:6px;background:${color(m)}`}); th.append(sw, document.createTextNode(m.name)); tr.append(th);
+    const vals = [];
+    for (const s of songs) {
+      const v = val(m, s); vals.push(v);
+      const [bg, fg] = heatColor(M, v, lo, hi);
+      const td = el("td", {class: "cell", tabindex: 0}, isNaN(v) ? "–" : M.fmt(v).replace("×", ""));
+      td.style.background = bg; td.style.color = fg;
+      const tipIt = e => showTip(e, `${s.title} · ${m.name}`, rowsFor({song: s.key, method: m.id}).map(r => ({value: M.fmt(r.sc[M.id]), label: DIFF_NAMES[r.d]})));
+      td.addEventListener("pointermove", tipIt); td.addEventListener("pointerleave", hideTip);
+      td.onclick = () => selectDetail(s.key);
+      tr.append(td);
+    }
+    tr.append(el("td", {style: "font-weight:600"}, isNaN(mean(vals.filter(v => !isNaN(v)))) ? "" : M.fmt(mean(vals.filter(v => !isNaN(v))))));
+    t.append(tr);
+  }
+  wrap.append(t); body.append(wrap);
+  const sc = el("div", {class: "scale"});
+  const bar = el("span", {class: "bar"});
+  if (M.id === "density") { bar.style.background = "linear-gradient(90deg, var(--div-lo), var(--div-mid), var(--div-hi))"; sc.append(el("span", {}, "×0.5 fewer notes"), bar, el("span", {}, "×2 more notes")); }
+  else { bar.style.background = "linear-gradient(90deg, var(--seq-lo), var(--seq-hi))"; sc.append(el("span", {}, M.fmt(lo)), bar, el("span", {}, M.fmt(hi))); }
+  body.append(sc);
+}
+
+function renderTiming() {
+  const methods = DATA.methods.filter(m => !m.pending && !state.off.has(m.id));
+  const bins = DATA.offsetBins;
+  // offsets: one small panel per method
+  const body = card("c-offsets", "Timing error of each note", "Share of a method's notes at each distance from the nearest real note (+ = the real note is later). Shaded: within 30 ms.", () => table(["Method", "Median offset (ms)", "Within 30 ms", "30 to 80 ms"], DATA.methods.filter(m => !m.pending).map(m => { const rs = rowsFor({method: m.id}); const h = bins.slice(0, -1).map((_, i) => rs.reduce((a, r) => a + r.off[i], 0)); const tot = h.reduce((a, b) => a + b, 0) || 1; const within = bins.slice(0, -1).reduce((a, b, i) => a + (Math.abs(b + 5) <= 30 ? h[i] : 0), 0); const mid = bins.slice(0, -1).reduce((a, b, i) => a + (Math.abs(b + 5) > 30 && Math.abs(b + 5) <= 80 ? h[i] : 0), 0); return [m.name, median(rs.map(r => r.offMedian).filter(v => v !== null)).toFixed(0), (100 * within / tot).toFixed(0) + "%", (100 * mid / tot).toFixed(0) + "%"]; })));
+  body.append(legend(DATA.methods.filter(m => !m.pending).map(m => ({id: m.id, name: m.name, color: color(m), shape: "rect"})), true));
+  const grid = el("div", {class: "grid g3"}); body.append(grid);
+  for (const m of methods) {
+    const rs = rowsFor({method: m.id});
+    const h = bins.slice(0, -1).map((_, i) => rs.reduce((a, r) => a + r.off[i], 0));
+    const tot = h.reduce((a, b) => a + b, 0) || 1;
+    const share = h.map(v => v / tot);
+    const box = el("div"); grid.append(box);
+    box.append(el("div", {class: "sub", style: "margin:6px 0 0"}, m.name));
+    const W = Math.max(260, (grid.clientWidth || 900) / 3 - 20), H = 130, L = 30, B = 22, T = 6;
+    const ymax = Math.max(0.2, ...share);
+    const X = v => L + (W - L - 6) * (v - bins[0]) / (bins[bins.length - 1] - bins[0]);
+    const Y = v => T + (H - T - B) * (1 - v / ymax);
+    const s = sv("svg", {width: W, height: H});
+    s.append(sv("rect", {x: X(-30), y: T, width: X(30) - X(-30), height: H - T - B, fill: "var(--band)"}));
+    for (const t of [0, ymax / 2]) { s.append(sv("line", {class: "gridl", x1: L, x2: W - 6, y1: Y(t), y2: Y(t)})); s.append(sv("text", {x: L - 4, y: Y(t) + 4, "text-anchor": "end"}, Math.round(t * 100) + "%")); }
+    share.forEach((v, i) => {
+      const x = X(bins[i]) + 1, w = X(bins[i + 1]) - X(bins[i]) - 2, y = Y(v), hgt = Y(0) - Y(v);
+      const r = sv("rect", {x, y, width: Math.max(1, w), height: Math.max(0, hgt), rx: 2, fill: color(m), class: "mark"});
+      const hit = sv("rect", {x: X(bins[i]), y: T, width: X(bins[i + 1]) - X(bins[i]), height: H - T - B, class: "hit"});
+      hit.addEventListener("pointermove", e => { r.classList.add("hot"); showTip(e, `${m.name}: ${bins[i]} to ${bins[i + 1]} ms`, [{value: (v * 100).toFixed(1) + "%", label: "of its notes"}]); });
+      hit.addEventListener("pointerleave", () => { r.classList.remove("hot"); hideTip(); });
+      s.append(r, hit);
+    });
+    s.append(sv("line", {class: "axisl", x1: L, x2: W - 6, y1: Y(0), y2: Y(0)}));
+    for (const t of [-150, -100, -50, 0, 50, 100, 150]) s.append(sv("text", {x: X(t), y: H - 6, "text-anchor": "middle"}, t));
+    box.append(s);
+  }
+  // best shift: dots per map
+  const sb = card("c-shift", "Best fixed shift per map", "Shift every note of a map by one amount and keep the best timing F1. A method with a lagging clock sits away from zero.", () => table(["Method", "Median best shift (ms)", "Timing F1", "after the shift"], DATA.methods.filter(m => !m.pending).map(m => { const rs = rowsFor({method: m.id}); return [m.name, median(rs.map(r => r.shift)).toFixed(0), mean(rs.map(r => r.sc.timingF1)).toFixed(2), mean(rs.map(r => r.shiftF1)).toFixed(2)]; })));
+  const W = width(sb), rowH = 30, Lw = Math.min(200, W * 0.36), H = 10 + methods.length * rowH + 24;
+  const X = v => Lw + (W - Lw - 16) * (v + 100) / 200;
+  const s = sv("svg", {width: W, height: H});
+  for (const t of [-100, -50, 0, 50, 100]) { s.append(sv("line", {class: t === 0 ? "axisl" : "gridl", x1: X(t), x2: X(t), y1: 6, y2: H - 20})); s.append(sv("text", {x: X(t), y: H - 6, "text-anchor": "middle"}, t + " ms")); }
+  s.append(sv("rect", {x: X(-30), y: 6, width: X(30) - X(-30), height: H - 26, fill: "var(--band)"}));
+  methods.forEach((m, i) => {
+    const cy = 10 + i * rowH + rowH / 2;
+    s.append(sv("text", {x: Lw - 10, y: cy + 4, "text-anchor": "end", class: "lbl"}, m.name));
+    const rs = rowsFor({method: m.id});
+    rs.forEach((r, j) => {
+      const jitter = ((j * 37) % 11 - 5) * 1.2;
+      const c = sv("circle", {cx: X(r.shift), cy: cy + jitter, r: 4, fill: color(m), stroke: "var(--surface-1)", "stroke-width": 2, class: "mark"});
+      const hit = sv("circle", {cx: X(r.shift), cy: cy + jitter, r: 10, class: "hit"});
+      hit.addEventListener("pointermove", e => showTip(e, `${songsByKey[r.s].title} · ${DIFF_NAMES[r.d]}`, [{value: (r.shift > 0 ? "+" : "") + r.shift + " ms", label: "best shift", color: color(m)}, {value: r.sc.timingF1.toFixed(2), label: "timing F1 as made"}, {value: r.shiftF1.toFixed(2), label: "after the shift"}]));
+      hit.addEventListener("pointerleave", hideTip);
+      s.append(c, hit);
+    });
+    const md = median(rs.map(r => r.shift));
+    if (!isNaN(md)) s.append(sv("line", {x1: X(md), x2: X(md), y1: cy - 11, y2: cy + 11, stroke: "var(--text-primary)", "stroke-width": 2}));
+  });
+  sb.append(s);
+  sb.append(el("p", {class: "sub"}, "Dots: maps. Bar: the method's median."));
+  // precision vs recall small multiples
+  const pb = card("c-pr", "Timing precision and recall", "Precision: share of generated notes that match a real one. Recall: share of real notes that got one. Each dot is a map; the other methods are grey for context.", () => table(["Method", "Precision", "Recall"], DATA.methods.filter(m => !m.pending).map(m => { const rs = rowsFor({method: m.id}); return [m.name, mean(rs.map(r => r.sc.timingPrecision)).toFixed(2), mean(rs.map(r => r.sc.timingRecall)).toFixed(2)]; })));
+  const g = el("div", {class: "grid", style: "grid-template-columns:repeat(auto-fit,minmax(170px,1fr))"}); pb.append(g);
+  const allRows = rowsFor().filter(r => methods.some(m => m.id === r.m));
+  for (const m of methods) {
+    const box = el("div"); g.append(box); box.append(el("div", {class: "sub", style: "margin:4px 0 0"}, m.name));
+    const S = 170, P = 26;
+    const X2 = v => P + (S - P - 6) * v, Y2 = v => 6 + (S - P - 6) * (1 - v);
+    const s2 = sv("svg", {width: S, height: S});
+    for (const t of [0, 0.5, 1]) { s2.append(sv("line", {class: "gridl", x1: X2(0), x2: X2(1), y1: Y2(t), y2: Y2(t)})); s2.append(sv("line", {class: "gridl", x1: X2(t), x2: X2(t), y1: Y2(0), y2: Y2(1)})); s2.append(sv("text", {x: X2(t), y: S - 6, "text-anchor": "middle"}, t)); s2.append(sv("text", {x: P - 4, y: Y2(t) + 4, "text-anchor": "end"}, t)); }
+    for (const r of allRows) if (r.m !== m.id) s2.append(sv("circle", {cx: X2(r.sc.timingRecall), cy: Y2(r.sc.timingPrecision), r: 2.5, fill: "var(--axis)"}));
+    for (const r of allRows.filter(r => r.m === m.id)) {
+      s2.append(sv("circle", {cx: X2(r.sc.timingRecall), cy: Y2(r.sc.timingPrecision), r: 4, fill: color(m), stroke: "var(--surface-1)", "stroke-width": 2}));
+      const hit = sv("circle", {cx: X2(r.sc.timingRecall), cy: Y2(r.sc.timingPrecision), r: 10, class: "hit"});
+      hit.addEventListener("pointermove", e => showTip(e, `${songsByKey[r.s].title} · ${DIFF_NAMES[r.d]}`, [{value: r.sc.timingPrecision.toFixed(2), label: "precision", color: color(m)}, {value: r.sc.timingRecall.toFixed(2), label: "recall"}, {value: r.sc.timingF1.toFixed(2), label: "timing F1"}]));
+      hit.addEventListener("pointerleave", hideTip);
+      s2.append(hit);
+    }
+    s2.append(sv("text", {x: S - 6, y: S - P - 2, "text-anchor": "end"}, "recall →"));
+    s2.append(sv("text", {x: P + 4, y: 16}, "↑ precision"));
+    box.append(s2);
+  }
+}
+
+function renderSnapping() {
+  const snaps = DATA.snapping.filter(e => (state.song === "all" || e.s === state.song) && (state.diff === "all" || e.d === state.diff));
+  const mids = [...new Set(snaps.map(e => e.m))].filter(id => methodsById[id]);
+  const wins = [0, 30, 50, 80];
+  const body = card("c-snap", "Timing F1 by snapping window", "0 ms = the maps as made.", () => table(["Method", ...wins.map(w => w ? `${w} ms` : "as made")], mids.map(id => [methodsById[id].name, ...wins.map(w => mean(snaps.filter(e => e.m === id).map(e => e["t" + w])).toFixed(3))])));
+  if (!mids.length) { body.append(el("p", {class: "pending"}, "No maps yet.")); return; }
+  const series = mids.map(id => ({id, name: methodsById[id].name, short: methodsById[id].name, color: color(methodsById[id]), dots: true, points: wins.map(w => [w, mean(snaps.filter(e => e.m === id).map(e => e["t" + w]))])}));
+  body.append(legend(series.map(s => ({id: s.id, name: s.name, color: s.color})), true));
+  lines(body, series, {xmin: 0, xmax: 80, ymin: 0, ymax: 1, xtick: t => t + " ms", xfmt: v => v ? `snap within ${v} ms` : "as made", yfmt: v => v.toFixed(3), height: 240});
+  // per song: as made -> 80 ms, for the first of our methods in view
+  const id = mids.find(i => !state.off.has(i)) || mids[0];
+  const m = methodsById[id];
+  const per = DATA.songs.map(s => { const es = snaps.filter(e => e.m === id && e.s === s.key); return {s, a: mean(es.map(e => e.t0)), b: mean(es.map(e => e.t80))}; }).filter(x => !isNaN(x.a)).sort((x, y) => (y.b - y.a) - (x.b - x.a));
+  const b2 = card("c-snapsong", `Per song: ${m.name}`, "As made (hollow) → snapped within 80 ms (filled). Sorted by the change; songs where snapping hurts are at the bottom.", () => table(["Song", "As made", "Snapped 80 ms", "Change"], per.map(x => [x.s.title, x.a.toFixed(2), x.b.toFixed(2), (x.b - x.a >= 0 ? "+" : "") + (x.b - x.a).toFixed(2)])));
+  const W = width(b2), rowH = 24, Lw = Math.min(220, W * 0.4), H = 8 + per.length * rowH + 22;
+  const X = v => Lw + (W - Lw - 40) * v;
+  const s = sv("svg", {width: W, height: H});
+  for (const t of [0, 0.25, 0.5, 0.75, 1]) { s.append(sv("line", {class: "gridl", x1: X(t), x2: X(t), y1: 4, y2: H - 18})); s.append(sv("text", {x: X(t), y: H - 4, "text-anchor": "middle"}, t)); }
+  per.forEach((x, i) => {
+    const cy = 8 + i * rowH + rowH / 2;
+    s.append(sv("text", {x: Lw - 10, y: cy + 4, "text-anchor": "end", class: "lbl"}, x.s.title.length > 30 ? x.s.title.slice(0, 29) + "…" : x.s.title));
+    s.append(sv("line", {x1: X(x.a), x2: X(x.b), y1: cy, y2: cy, stroke: color(m), "stroke-width": 2}));
+    s.append(sv("circle", {cx: X(x.a), cy, r: 4, fill: "var(--surface-1)", stroke: color(m), "stroke-width": 2}));
+    s.append(sv("circle", {cx: X(x.b), cy, r: 4, fill: color(m), stroke: "var(--surface-1)", "stroke-width": 2}));
+    const hit = sv("rect", {x: Lw, y: cy - rowH / 2, width: W - Lw, height: rowH, class: "hit"});
+    hit.addEventListener("pointermove", e => showTip(e, x.s.title, [{value: x.a.toFixed(2), label: "as made"}, {value: x.b.toFixed(2), label: "snapped within 80 ms", color: color(m)}, {value: (x.b - x.a >= 0 ? "+" : "") + (x.b - x.a).toFixed(2), label: "change"}]));
+    hit.addEventListener("pointerleave", hideTip);
+    s.append(hit);
+  });
+  b2.append(s);
+}
+
+function selectDetail(key) { state.detailSong = key; renderDetail(); renderHeat(); document.getElementById("detail").scrollIntoView({behavior: "smooth"}); }
+
+function renderDetail() {
+  const key = state.detailSong || (state.song !== "all" ? state.song : [...DATA.songs].sort((a, b) => a.title.localeCompare(b.title))[0].key);
+  state.detailSong = key;
+  const song = songsByKey[key];
+  const diff = state.diff === "all" ? "ExpertPlus" : state.diff;
+  $("detail-lede").textContent = `${song.title} · ${song.artist} · ${DIFF_NAMES[diff]}${state.diff === "all" ? " (pick Expert in the filters to switch)" : ""} · ${Math.round(song.seconds)} s. Pick another song in the filters or click one in the table above.`;
+  const real = DATA.real[`${key}|${diff}`];
+  const mrows = DATA.methods.filter(m => !m.pending).map(m => ({m, r: DATA.rows.find(r => r.m === m.id && r.s === key && r.d === diff)})).filter(x => x.r);
+  const bin = DATA.densityBin;
+  // density over time
+  const series = [{id: "real", name: "Real map", short: "real", color: "var(--ref)", width: 2.5, area: true, points: real ? real.dens.map((v, i) => [i * bin + bin / 2, v]) : []}]
+    .concat(mrows.map(({m, r}) => ({id: m.id, name: m.name, color: color(m), points: r.dens.map((v, i) => [i * bin + bin / 2, v])})));
+  const body = card("c-density", "Notes per second over the song", `${bin}-second bins. Hover for every map at that moment; click legend entries to hide them.`, () => table(["Time", ...series.map(s => s.name)], (series[0].points.length ? series[0].points : series[1]?.points || []).map((p, i) => [clock(p[0]), ...series.map(s => s.points[i] ? s.points[i][1].toFixed(1) : "")])));
+  body.append(legend(series.map(s => ({id: s.id, name: s.name, color: s.color})), true));
+  lines(body, series, {xmin: 0, xmax: song.seconds, ymin: 0, xtick: t => clock(t), xfmt: v => clock(v), yfmt: v => v.toFixed(1) + "/s", height: 280});
+  // note strip
+  renderStrip(key, diff, song, real, mrows);
+  // per-method table for this song
+  const tb = card("c-songtable", `Scores for ${song.title}`, DIFF_NAMES[diff]);
+  tb.append(table(["Method", "Timing F1", "Colour F1", "Placement", "Cut", "Density", "Swing errors", "Best shift"], mrows.map(({m, r}) => [m.name, r.sc.timingF1.toFixed(2), r.sc.colourF1.toFixed(2), r.sc.place.toFixed(2), r.sc.cut.toFixed(2), "×" + r.sc.density.toFixed(2), r.sc.swingErrors.toFixed(1), (r.shift > 0 ? "+" : "") + r.shift + " ms"])));
+}
+function clock(t) { const m = Math.floor(t / 60), s = Math.floor(t % 60); return `${m}:${String(s).padStart(2, "0")}`; }
+
+function renderStrip(key, diff, song, real, mrows) {
+  const span = 12;
+  state.stripStart = Math.min(state.stripStart, Math.max(0, song.seconds - span));
+  const body = card("c-strip", "The notes themselves", "A 12-second window. Each row is a map; a note's height in its row is its layer (bottom, middle, top), and its shape its hand (square = left, circle = right). Filled: within 30 ms of a real note. Hollow: no real note there.");
+  const ctr = el("div", {class: "strip-controls"});
+  const back = el("button", {}, "◀ 12 s"), fwd = el("button", {}, "12 s ▶");
+  const range = el("input", {type: "range", min: 0, max: Math.max(0, Math.floor(song.seconds - span)), step: 0.5, value: state.stripStart, "aria-label": "Window start"});
+  const lab = el("span", {style: "min-width:110px;color:var(--text-secondary);font-size:13px"});
+  ctr.append(back, range, fwd, lab); body.append(ctr);
+  const holder = el("div"); body.append(holder);
+  const draw = () => {
+    holder.replaceChildren();
+    const t0 = state.stripStart, t1 = t0 + span;
+    lab.textContent = `${clock(t0)} – ${clock(t1)}`;
+    const rows = [{name: "Real map", color: "var(--ref)", notes: real ? real.notes.map(n => n.concat([1])) : []}].concat(mrows.map(({m, r}) => ({name: m.name, color: color(m), notes: r.notes})));
+    const W = width(holder), Lw = Math.min(190, W * 0.3), rowH = 44, H = rows.length * rowH + 22;
+    const X = t => Lw + (W - Lw - 8) * (t - t0) / span;
+    const s = sv("svg", {width: W, height: H});
+    for (let t = Math.ceil(t0); t <= t1; t++) { s.append(sv("line", {class: "gridl", x1: X(t), x2: X(t), y1: 0, y2: H - 18})); if (t % 2 === 0) s.append(sv("text", {x: X(t), y: H - 4, "text-anchor": "middle"}, clock(t))); }
+    rows.forEach((row, i) => {
+      const y = i * rowH;
+      s.append(sv("line", {class: "gridl", x1: Lw, x2: W - 8, y1: y + rowH, y2: y + rowH}));
+      s.append(sv("text", {x: Lw - 10, y: y + rowH / 2 + 4, "text-anchor": "end", class: "lbl"}, row.name));
+      for (const n of row.notes) {
+        const t = n[0] / 100; if (t < t0 || t > t1) continue;
+        const cx = X(t), cy = y + rowH - 9 - n[3] * 12;
+        const filled = n[5] === 1;
+        const shape = n[1] === 0 ? sv("rect", {x: cx - 4, y: cy - 4, width: 8, height: 8, rx: 1.5}) : sv("circle", {cx, cy, r: 4.2});
+        shape.setAttribute("fill", filled ? row.color : "var(--surface-1)");
+        shape.setAttribute("stroke", filled ? "var(--surface-1)" : row.color);
+        shape.setAttribute("stroke-width", filled ? 1.5 : 1.6);
+        const hit = sv("circle", {cx, cy, r: 9, class: "hit"});
+        const dirs = ["up", "down", "left", "right", "up-left", "up-right", "down-left", "down-right", "any"];
+        hit.addEventListener("pointermove", e => showTip(e, `${row.name} · ${t.toFixed(2)} s`, [{value: n[1] === 0 ? "left" : "right", label: "hand", color: row.color}, {value: `lane ${n[2] + 1}, ${["bottom", "middle", "top"][n[3]] || n[3]}`, label: "place"}, {value: dirs[n[4]] || n[4], label: "cut"}, {value: filled ? "yes" : "no", label: i === 0 ? "" : "a real note within 30 ms"}]));
+        hit.addEventListener("pointerleave", hideTip);
+        s.append(shape, hit);
+      }
+    });
+    holder.append(s);
+  };
+  range.oninput = () => { state.stripStart = +range.value; draw(); };
+  back.onclick = () => { state.stripStart = Math.max(0, state.stripStart - span); range.value = state.stripStart; draw(); };
+  fwd.onclick = () => { state.stripStart = Math.min(+range.max, state.stripStart + span); range.value = state.stripStart; draw(); };
+  draw();
+}
+
+function renderTraining() {
+  const runs = DATA.runs;
+  const tbl = key => () => table(["Run", "Minutes", "Step", key === "heldout" ? "Held-out loss" : "Note speed right"], runs.flatMap(r => r.points.map(p => [r.name, p.minutes.toFixed(0), p.step, key === "heldout" ? p.heldout.toFixed(3) : (100 * p.njs).toFixed(0) + "%"])));
+  const series = runs.map(r => ({id: "run-" + r.name, name: r.name + (r.pending ? " (no evaluation yet)" : ""), short: r.name, color: `var(--s${r.slot})`, dots: r.points.length < 12, points: r.points.map(p => [p.minutes, p.heldout])}));
+  const b = card("c-loss", "Held-out loss over training", "Lower is better.", tbl("heldout"));
+  b.append(legend(series.map(s => ({id: s.id, name: s.name, color: s.color})), true));
+  if (series.some(s => s.points.length)) lines(b, series, {xmin: 0, ymin: Math.floor(10 * Math.min(...series.flatMap(s => s.points.map(p => p[1])))) / 10, xtick: t => t + " min", xfmt: v => `${v.toFixed(0)} minutes of training`, yfmt: v => v.toFixed(3), height: 260});
+  const s2 = runs.map(r => ({id: "run-" + r.name, name: r.name, color: `var(--s${r.slot})`, dots: r.points.length < 12, points: r.points.map(p => [p.minutes, p.njs])}));
+  const b2 = card("c-njs", "Note speed predicted exactly", "Share of held-out windows where the model picks the map's exact note jump speed.", tbl("njs"));
+  b2.append(legend(s2.map(s => ({id: s.id, name: s.name, color: s.color})), true));
+  if (s2.some(s => s.points.length)) lines(b2, s2, {xmin: 0, ymin: 0, ymax: 1, xtick: t => t + " min", ytick: t => Math.round(t * 100) + "%", xfmt: v => `${v.toFixed(0)} minutes`, yfmt: v => Math.round(v * 100) + "%", height: 260});
+}
+
+function renderSpeed() {
+  const b = card("c-speed", "Measured generation speed", "From the tests named in each row.", () => table(["What", "Value", "Note"], DATA.speed.map(r => [r.label, `${r.value} ${r.unit}`, r.note || ""])));
+  if (DATA.speed.length) hbars(b, DATA.speed.map((r, i) => ({name: r.label, value: r.value, color: `var(--s${r.slot || 1})`, tip: [{value: `${r.value} ${r.unit}`, label: r.note || ""}]})), {fmt: v => v.toFixed(1) + " s"});
+  const gen = DATA.methods.filter(m => !m.pending && !m.from).map(m => { const rs = DATA.rows.filter(r => r.m === m.id && r.genSeconds); return {m, v: rs.length ? mean(rs.map(r => r.genSeconds / songsByKey[r.s].seconds * 60)) : NaN}; }).filter(x => !isNaN(x.v));
+  const b2 = card("c-gen", "Compute per minute of music", "Seconds to write one difficulty, per minute of song, on this Mac (an M1 Max shared with other work).", () => table(["Method", "Seconds per minute of music"], gen.map(x => [x.m.name, x.v.toFixed(1)])));
+  if (gen.length) hbars(b2, gen.map(x => ({name: x.m.name, value: x.v, color: color(x.m)})), {fmt: v => v.toFixed(1) + " s"}); else b2.append(el("p", {class: "pending"}, "No timings recorded yet."));
+}
+
+function renderNotes() {
+  const ul = $("notes-list"); ul.replaceChildren();
+  for (const m of METRICS) ul.append(el("li", {}, `${m.name}: ${m.about}.`));
+  for (const n of DATA.notes) ul.append(el("li", {}, n));
+  for (const m of DATA.methods) if (m.note) ul.append(el("li", {}, `${m.name}: ${m.note}`));
+}
+
+function renderAll() {
+  hideTip();
+  renderFilters(); renderOverview(); renderBoard(); renderMulti(); renderHeat(); renderTiming(); renderSnapping(); renderDetail(); renderTraining(); renderSpeed(); renderNotes();
+}
+document.querySelectorAll("nav.side .theme button").forEach(b => b.onclick = () => { document.documentElement.dataset.theme = b.dataset.t; renderAll(); });
+const links = [...document.querySelectorAll("nav.side a")];
+const obs = new IntersectionObserver(es => es.forEach(e => { if (e.isIntersecting) links.forEach(a => a.classList.toggle("on", a.getAttribute("href") === "#" + e.target.id)); }), {rootMargin: "-40% 0px -55% 0px"});
+document.querySelectorAll("main section").forEach(s => obs.observe(s));
+let rt; window.addEventListener("resize", () => { clearTimeout(rt); rt = setTimeout(renderAll, 150); });
+renderAll();
+</script>
+</body>
+</html>
