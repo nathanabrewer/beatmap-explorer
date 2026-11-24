@@ -33,7 +33,7 @@ svg text{fill:var(--text-secondary);font-size:12px}svg .val{fill:var(--text-prim
 .tip{position:fixed;pointer-events:none;background:var(--surface-1);color:var(--text-primary);border:1px solid var(--grid);
 border-radius:6px;padding:4px 8px;font-size:12px;display:none}
 table{border-collapse:collapse;width:100%;font-size:14px}th,td{text-align:left;padding:4px 8px;border-bottom:1px solid var(--grid)}
-th{color:var(--text-secondary);font-weight:600}td.n{text-align:right;font-variant-numeric:tabular-nums}
+th{color:var(--text-secondary);font-weight:600}td.n,th.n{text-align:right;font-variant-numeric:tabular-nums}
 figure{margin:12px 0}figure img{width:100%;border-radius:8px}figcaption{color:var(--text-secondary);font-size:13px;margin-top:4px}
 ul.notes{color:var(--text-secondary)}details summary{cursor:pointer;color:var(--text-secondary);font-size:13px}
 """
@@ -78,7 +78,7 @@ def line_chart(points, y_label):
     sx = lambda x: L + (x - x0) / ((x1 - x0) or 1) * (W - L - R)
     sy = lambda y: T + (1 - (y - y0) / ((y1 - y0) or 1)) * (H - T - B)
     out = [f'<svg viewBox="0 0 {W} {H}" width="100%" role="img" aria-label="{esc(y_label)} by training step">']
-    for t in nice_ticks(y0, y1, 6):
+    for t in nice_ticks(y0, y1, 8):
         out.append(f'<line class="grid" x1="{L}" x2="{W - R}" y1="{sy(t):.1f}" y2="{sy(t):.1f}"/><text x="{L - 8}" y="{sy(t) + 4:.1f}" text-anchor="end">{t:g}</text>')
     for t in nice_ticks(x0, x1, 6):
         out.append(f'<text x="{sx(t):.1f}" y="{H - 30}" text-anchor="middle">{int(t):,}</text>')
@@ -94,7 +94,7 @@ def line_chart(points, y_label):
 
 def bar_chart(rows, unit):
     """rows: [(label, value)] -> horizontal bars from a zero baseline, value labels."""
-    W, row_h, L, R = 900, 34, 230, 70
+    W, row_h, L, R = 900, 34, 320, 70
     vmax = max((v for _, v in rows), default=1) or 1
     H = row_h * len(rows) + 8
     out = [f'<svg viewBox="0 0 {W} {H}" width="100%" role="img" aria-label="{esc(unit)} by method">']
@@ -109,7 +109,8 @@ def bar_chart(rows, unit):
 
 
 def table(columns, rows):
-    head = "".join(f"<th>{esc(c)}</th>" for c in columns)
+    numeric = [bool(rows) and isinstance(rows[0][i], (int, float)) for i in range(len(columns))]
+    head = "".join(f'<th class="{"n" if numeric[i] else ""}">{esc(c)}</th>' for i, c in enumerate(columns))
     body = "".join("<tr>" + "".join(f'<td class="{"n" if isinstance(v, (int, float)) else ""}">{esc(f"{v:.3f}" if isinstance(v, float) else v)}</td>' for v in r) + "</tr>" for r in rows)
     return f"<table><thead><tr>{head}</tr></thead><tbody>{body}</tbody></table>"
 

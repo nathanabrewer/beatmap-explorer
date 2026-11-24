@@ -4,9 +4,11 @@ An audio-to-map model: it listens to a song and writes a Beat Saber map for a
 chosen difficulty, note by note, the way a speech model writes a transcript.
 Beatmap Explorer is how its maps are judged: open them beside the real ones.
 
-**Status:** pipeline built and checked end to end on a small local run; the
-first full training run (on community maps, on a rented GPU) is next. Results
-will be added here as they come in, good or bad.
+**Status (2026-11-24):** first trained model. A 26M-parameter model trained
+for 20 minutes on one rented RTX 4090 from 5,145 BeatSaver songs: timing F1
+0.33 and colour F1 0.20 on held-out maps (small sample), held-out loss 1.59.
+Results, charts and example maps: [docs/results/index.html](../docs/results/index.html)
+and the main README.
 
 ## The idea
 
@@ -21,8 +23,10 @@ will be added here as they come in, good or bad.
   what it learns about music is shared by all of them.
 - **Flow:** windows overlap by 2 seconds and each one is given the notes already
   placed there, so a long map stays continuous.
-- **Guard rails:** while it writes, the token grammar is enforced and a hand may
-  not swing the same way twice within half a second.
+- **Guard rails:** while it writes, the token grammar is enforced; a hand may
+  not swing the same way twice within half a second, a hand's notes are at
+  least 0.2-0.6 s apart by difficulty (notes at the same moment are fine), new
+  walls come at most once a second, and bombs only when both hands are free.
 - **Lights:** a second model (a "lighter") that hears the song and reads the
   finished notes; not built yet.
 

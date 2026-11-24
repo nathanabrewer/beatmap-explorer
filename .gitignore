@@ -21,3 +21,4 @@ bundle
 *.png
 *.jpg
 !docs/*.png
+!docs/results/*.png
