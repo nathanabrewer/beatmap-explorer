@@ -26,6 +26,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import data as D  # noqa: E402
 import generate as G  # noqa: E402
+import prepare as P  # noqa: E402
 from model import MapModel  # noqa: E402
 
 TOL = 0.03
@@ -116,7 +117,7 @@ def main():
     for folder, m, *_ in items:
         song = json.load(gzip.open(os.path.join(folder, m["key"] + ".json.gz"), "rt"))
         ref = next(d for d in song["difficulties"] if d.get("chart") and d["rank"] == m["rank"] and d["characteristic"] == m["char"])
-        mel = np.load(os.path.join(folder, m["key"] + ".mel.npy")).astype(np.float32)
+        mel = P.mel_float(P.read_mel(os.path.join(folder, m["key"] + ".mel.npy")))
         njs, objs = G.generate_difficulty(model, mel, m["rank"], m["char"], dev, a.temperature, not a.no_rules, 1)
         gen = [(o["tick"] / 100.0, o["c"], o["x"], o["y"], o["d"]) for o in objs if o["kind"] == "note"]
         real = [(n[0], n[4], n[2], n[3], n[5]) for n in ref["chart"]["notes"]]

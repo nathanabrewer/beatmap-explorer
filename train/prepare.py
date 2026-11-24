@@ -7,8 +7,12 @@
 For each song it writes, into --out:
     <key>.json.gz   the song (title, artist, mapper, BPM, source) and every
                     difficulty with its chart, as read by train/charts.py
-    <key>.mel.npy   log-mel spectrogram, float16, shape (frames, 96): 24 kHz
-                    mono, 100 frames per second (10 ms), 20 Hz to 12 kHz
+    <key>.mel.npy   log-mel spectrogram, shape (frames, 96): 24 kHz mono,
+                    100 frames per second (10 ms), 20 Hz to 12 kHz; stored as
+                    8-bit steps of 0.094 (about 0.4 dB) from MEL_LO to MEL_HI,
+                    half the size of float16, so the whole BeatSaver list
+                    (about 1,660 hours) fits a 60-100 GB disk. Read it with
+                    read_mel(), which also reads older float16 files.
 BeatSaver maps are downloaded one at a time per worker into a fresh temporary
 folder, unpacked (names that would leave the folder are refused), processed
 and deleted, so only the compact result stays on disk. Downloads are treated
@@ -42,6 +46,31 @@ N_MELS = 96
 FMIN, FMAX = 20, 12000
 MAX_UNPACKED = 300 * 1024 * 1024
 USER_AGENT = "beatmap-explorer-dataset/0.1"
+# The stored log-mel range. Silence is log(1e-6) = -13.8 and loud masters
+# peak near 9.3, so the 8-bit steps cover every value with a little room.
+MEL_LO, MEL_HI = -14.0, 10.0
+MEL_STEP = (MEL_HI - MEL_LO) / 255
+
+
+def quantize(feats):
+    import numpy as np
+    q = np.rint((np.asarray(feats, dtype=np.float32) - MEL_LO) / MEL_STEP)
+    return np.clip(q, 0, 255).astype(np.uint8)
+
+
+def mel_float(m):
+    """A stored spectrogram (or a slice of one) as float32 log-mel values."""
+    import numpy as np
+    if m.dtype == np.uint8:
+        return m.astype(np.float32) * np.float32(MEL_STEP) + np.float32(MEL_LO)
+    return np.asarray(m, dtype=np.float32)
+
+
+def read_mel(path, mmap=False):
+    """The stored array as it is on disk (uint8 or float16); pass slices of it
+    through mel_float(). With mmap, nothing is read until it is sliced."""
+    import numpy as np
+    return np.load(path, mmap_mode="r" if mmap else None)
 
 
 def mel(audio_path):
@@ -58,13 +87,14 @@ def save(out, key, song, audio_path):
     song = dict(song)
     song["key"] = key
     song["seconds"] = round(seconds, 3)
-    song["features"] = {"sampleRate": SAMPLE_RATE, "hop": HOP, "nFft": N_FFT, "nMels": N_MELS, "fmin": FMIN, "fmax": FMAX, "frames": int(feats.shape[0])}
+    song["features"] = {"sampleRate": SAMPLE_RATE, "hop": HOP, "nFft": N_FFT, "nMels": N_MELS, "fmin": FMIN, "fmax": FMAX, "frames": int(feats.shape[0]),
+                        "stored": {"dtype": "uint8", "lo": MEL_LO, "hi": MEL_HI}}
     for d in song["difficulties"]:
         for k in ("beatmap", "lightshow"):
             d[k] = os.path.basename(d.get(k) or "")
     for k in ("audio", "audioData", "folder"):
         song.pop(k, None)
-    np.save(os.path.join(out, key + ".mel.npy"), feats)
+    np.save(os.path.join(out, key + ".mel.npy"), quantize(feats))
     tmp = os.path.join(out, key + ".json.gz.tmp")
     with gzip.open(tmp, "wt", encoding="utf-8") as f:
         json.dump(song, f, separators=(",", ":"))
@@ -132,9 +162,16 @@ def beatsaver_one(rec, out):
     return key, "ok", n
 
 
-def run_pool(jobs, out, workers, max_minutes=0):
+def disk_free_gb(path):
+    return shutil.disk_usage(path).free / 1e9
+
+
+def run_pool(jobs, out, workers, max_minutes=0, min_free_gb=0):
     """Run the jobs with at most 2 x workers in flight; with max_minutes,
-    stop starting new ones at the deadline and finish those under way."""
+    stop starting new ones at the deadline and finish those under way. With
+    min_free_gb, also stop when the disk gets that full: with the list sorted
+    best first, a smaller disk then simply holds fewer, still the best, maps,
+    and training keeps room for its cache and checkpoints."""
     failed = open(os.path.join(out, "failed.jsonl"), "a")
     ok = skipped = bad = charts_done = 0
     start = time.time()
@@ -142,9 +179,16 @@ def run_pool(jobs, out, workers, max_minutes=0):
     pending = iter(jobs)
     futures = {}
     i = 0
+    disk_full = False
     with ProcessPoolExecutor(max_workers=workers) as pool:
+        def room():
+            nonlocal disk_full
+            if min_free_gb and not disk_full and disk_free_gb(out) < min_free_gb:
+                disk_full = True
+            return not disk_full
+
         def top_up():
-            while len(futures) < workers * 2 and (deadline is None or time.time() < deadline):
+            while len(futures) < workers * 2 and (deadline is None or time.time() < deadline) and room():
                 job = next(pending, None)
                 if job is None:
                     return
@@ -170,7 +214,9 @@ def run_pool(jobs, out, workers, max_minutes=0):
                 rate = i / max(time.time() - start, 1e-6)
                 print(f"{i}/{len(jobs)}: {ok} prepared ({charts_done} charts), {skipped} already there, {bad} failed; {rate:.2f} songs/s", flush=True)
             top_up()
-    if deadline is not None and time.time() >= deadline:
+    if disk_full:
+        print(f"stopped with {disk_free_gb(out):.1f} GB left on the disk after {i} of {len(jobs)} songs", flush=True)
+    elif deadline is not None and time.time() >= deadline:
         print(f"stopped at the {max_minutes} minute limit after {i} of {len(jobs)} songs", flush=True)
     failed.close()
     return ok, skipped, bad
@@ -207,6 +253,7 @@ def main():
     ap.add_argument("--workers", type=int, default=4)
     ap.add_argument("--limit", type=int, default=0)
     ap.add_argument("--max-minutes", type=float, default=0, help="stop starting new songs after this long")
+    ap.add_argument("--min-free-gb", type=float, default=0, help="stop starting new songs when the disk has less free than this")
     ap.add_argument("--best-first", action="store_true", help="ranked, then curated, then highest rated first")
     a = ap.parse_args()
     out = a.out or os.path.join(ROOT, "library", "train", {"beatsaver": "beatsaver", "official": "official", "folder": "maps"}[a.source])
@@ -222,7 +269,7 @@ def main():
         jobs = [(folder_one, f, f) for f in a.folders]
     if a.limit:
         jobs = jobs[:a.limit]
-    ok, skipped, bad = run_pool(jobs, out, a.workers, a.max_minutes)
+    ok, skipped, bad = run_pool(jobs, out, a.workers, a.max_minutes, a.min_free_gb)
     print(f"done: {ok} prepared, {skipped} already there, {bad} failed -> {out}")
 
 

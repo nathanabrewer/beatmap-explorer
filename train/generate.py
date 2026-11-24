@@ -273,7 +273,8 @@ def main():
     model.load_state_dict(ck["model"])
     model.to(dev).eval()
     if a.prepared:
-        mel = np.load(a.prepared + ".mel.npy").astype(np.float32)
+        from prepare import mel_float, read_mel
+        mel = mel_float(read_mel(a.prepared + ".mel.npy"))
         song = json.load(gzip.open(a.prepared + ".json.gz", "rt"))
         title, artist, bpm = a.title or song.get("title", ""), a.artist or song.get("artist", ""), float(song.get("bpm") or 120)
         audio = a.song_audio

@@ -61,6 +61,35 @@ def batches(ds, batch, seed, workers=4, depth=8):
         yield q.get()
 
 
+def fit_batch(model, batch, dev):
+    """The largest batch, at most `batch`, whose worst case fits the card.
+    Batches pad to their longest window, so one batch of dense windows can be
+    far bigger than the average; the worst case (every window at the token
+    limit) is tried once here, with room for the optimizer, instead of being
+    met hours into a run."""
+    if dev.type != "cuda":
+        return batch
+    n_mels, frames, max_len = model.config["n_mels"], model.config["frames"], model.config["max_len"]
+    while True:
+        fits = True
+        try:
+            reserve = [torch.empty_like(p) for p in model.parameters() for _ in range(2)]  # AdamW's two moments
+            mels = torch.zeros(batch, frames, n_mels, device=dev)
+            inp = torch.full((batch, max_len), T.SEP, dtype=torch.long, device=dev)
+            with torch.autocast(dev.type, dtype=torch.bfloat16):
+                logits = model(mels, inp)
+            F.cross_entropy(logits.float().flatten(0, 1), inp.flatten()).backward()
+        except torch.OutOfMemoryError:
+            fits = False
+        reserve = mels = inp = logits = None
+        model.zero_grad(set_to_none=True)
+        torch.cuda.empty_cache()
+        if fits or batch <= 4:
+            return batch
+        print(f"a worst-case batch of {batch} does not fit this card; trying {batch // 2}", flush=True)
+        batch //= 2
+
+
 def mel_stats(ds, n=200):
     rng = random.Random(1)
     xs = np.concatenate([ds.sample(rng)[0] for _ in range(n)])
@@ -126,11 +155,13 @@ def main():
         model.mel_std.fill_(std)
     model.to(dev)
     print(f"model {model.config['size']}: {parameters_m(model):.1f} M parameters", flush=True)
+    a.batch = fit_batch(model, a.batch, dev)
+    print(f"batch {a.batch}", flush=True)
     opt = torch.optim.AdamW(model.parameters(), lr=a.lr, betas=(0.9, 0.98), weight_decay=0.01)
     log = open(os.path.join(a.out, "log.jsonl"), "a")
     best = math.inf
     stream = batches(train, a.batch, a.seed, a.workers)
-    t0, seen = time.time(), 0
+    t0, seen, skipped = time.time(), 0, 0
     last_save = t0
     model.train()
 
@@ -147,11 +178,26 @@ def main():
         for g in opt.param_groups:
             g["lr"] = lr
         mels, inp, tgt, mask = (t.to(dev, non_blocking=True) for t in next(stream))
-        with torch.autocast(dev.type, dtype=torch.bfloat16, enabled=dev.type == "cuda"):
-            logits = model(mels, inp)
-        loss = F.cross_entropy(logits.float()[mask], tgt[mask])
-        opt.zero_grad(set_to_none=True)
-        loss.backward()
+        try:
+            with torch.autocast(dev.type, dtype=torch.bfloat16, enabled=dev.type == "cuda"):
+                logits = model(mels, inp)
+            loss = F.cross_entropy(logits.float()[mask], tgt[mask])
+            opt.zero_grad(set_to_none=True)
+            loss.backward()
+            out_of_memory = False
+        except torch.OutOfMemoryError:
+            out_of_memory = True
+        if out_of_memory:
+            # fit_batch() should prevent this; if the card's memory is
+            # fragmented, skip the batch rather than end a long run.
+            logits = loss = None
+            opt.zero_grad(set_to_none=True)
+            torch.cuda.empty_cache()
+            skipped += 1
+            print(f"step {step}: batch did not fit in memory, skipped ({skipped} so far)", flush=True)
+            if skipped > 50 and skipped > step // 20:
+                raise SystemExit("too many batches do not fit in memory; use a smaller --batch")
+            continue
         torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
         opt.step()
         seen += mels.shape[0]

@@ -20,6 +20,7 @@ from concurrent.futures import ProcessPoolExecutor
 
 import numpy as np
 
+import prepare as P
 import tokens as T
 
 SILENCE = float(np.log(1e-6))
@@ -111,7 +112,7 @@ class Windows:
             # only 1024, so keep a few hundred open at most.
             if len(self.mels) > 256:
                 self.mels.clear()
-            self.mels[path] = np.load(path, mmap_mode="r")
+            self.mels[path] = P.read_mel(path, mmap=True)
         return self.mels[path]
 
     def sample(self, rng=None):
@@ -136,7 +137,7 @@ class Windows:
         x = np.full((FRAMES, mel.shape[1]), SILENCE, dtype=np.float32)
         a, b = max(start, 0), min(start + FRAMES, mel.shape[0])
         if b > a:
-            x[a - start:b - start] = mel[a:b]
+            x[a - start:b - start] = P.mel_float(mel[a:b])
         return x, toks_out, sep
 
 

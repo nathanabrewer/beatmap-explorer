@@ -4,8 +4,11 @@
 # BeatSaver dataset on the machine's own disk (best maps first), trains for
 # the time left, scores held-out maps, and leaves checkpoints, logs and
 # scores in $FM_OUT (default ~/fm-out), which Foreman copies home every few
-# minutes and at the end. Settings (environment): PREP_MINUTES, TRAIN_MINUTES,
-# EVAL_LIMIT, SIZE, BATCH, WORKERS.
+# minutes and at the end. Settings (environment): PREP_MINUTES, MIN_FREE_GB
+# (preparing stops when the disk has this little left, so a small disk holds
+# the best maps that fit), TRAIN_MINUTES, SIZE, BATCH (the most; train.py
+# lowers it if the worst case does not fit the card), LR, WARMUP, EVAL_LIMIT,
+# EVAL_SECONDS, WORKERS.
 set -u
 here=$(cd "$(dirname "$0")" && pwd)
 out="${FM_OUT:-$HOME/fm-out}"
@@ -31,7 +34,7 @@ PY
 )
 workers="${WORKERS:-$(( cpus < 16 ? cpus : 16 ))}"
 started=$(date +%s)
-limit=""; command -v timeout >/dev/null && limit="timeout 360"
+limit=""; command -v timeout >/dev/null && limit="timeout ${EVAL_SECONDS:-360}"
 stamp() { echo "[$(( $(date +%s) - started ))s] $*" | tee -a "$out/timeline.txt"; }
 {
   echo "cpus: $cpus"
@@ -51,8 +54,10 @@ if ! python3 -c "import librosa, soundfile, numpy, torch" 2>>"$out/pip.log"; the
 fi
 stamp "preparing BeatSaver maps for ${PREP_MINUTES:-14} minutes with $workers workers"
 python3 -I train/prepare.py beatsaver --manifest train/dataset/manifest.jsonl --out "$data" --workers "$workers" \
-  --best-first --max-minutes "${PREP_MINUTES:-14}" > "$out/prepare.log" 2>&1
+  --best-first --max-minutes "${PREP_MINUTES:-14}" --min-free-gb "${MIN_FREE_GB:-8}" > "$out/prepare.log" 2>&1
 tail -2 "$out/prepare.log"
+du -sh "$data" | awk '{print "prepared data: "$1}' | tee -a "$out/timeline.txt"
+df -h "$data" | awk 'NR==2{print "disk free: "$4}' | tee -a "$out/timeline.txt"
 cp "$data/failed.jsonl" "$out/prepare-failed.jsonl" 2>/dev/null || true
 songs=$(ls "$data" | grep -c '\.json\.gz$')
 stamp "prepared $songs songs"
@@ -61,8 +66,8 @@ if [ "$songs" -lt "${MIN_SONGS:-50}" ]; then
 fi
 stamp "training for ${TRAIN_MINUTES:-22} minutes"
 python3 -I train/train.py --data "$data" --out "$out/run" --size "${SIZE:-small}" --steps 1000000 --batch "${BATCH:-64}" \
-  --lr 4e-4 --warmup 500 --workers 8 --eval-every 1500 --max-minutes "${TRAIN_MINUTES:-22}" --save-minutes 4 > "$out/train.log" 2>&1
-grep -E '^(==|stopped|done|model|[0-9]+ training)' "$out/train.log" | tail -6
+  --lr "${LR:-4e-4}" --warmup "${WARMUP:-500}" --workers 8 --eval-every 1500 --max-minutes "${TRAIN_MINUTES:-22}" --save-minutes 4 > "$out/train.log" 2>&1
+grep -E '^(==|stopped|done|model|batch [0-9]|[0-9]+ training)' "$out/train.log" | tail -7
 stamp "scoring held-out maps"
 $limit python3 -I train/evaluate.py --ckpt "$out/run/best.pt" --data "$data" --limit "${EVAL_LIMIT:-8}" \
   --out "$out/run/eval.json" > "$out/eval.log" 2>&1
