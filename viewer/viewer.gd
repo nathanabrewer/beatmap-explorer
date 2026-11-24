@@ -14,6 +14,8 @@ extends Node3D
 ## --char=<characteristic> --diff=<name>
 ## --at=<seconds> or --beat=<beat> --cam=player|orbit|side|top
 ## --view=whole|player --play
+## --beside=<map folder or zip> (repeatable: other maps of the same song in
+## lanes beside the main one) --names=<main>,<beside 1>,... (lane labels)
 ## --snap=<png> (saves the view a few frames in, or --snap-frames=<n>, then
 ## quits).
 
@@ -59,6 +61,21 @@ var cam_mode := "orbit"
 
 var _map_root: Node3D
 var _lanes := {}
+## Other maps of the same song (say, the real map, a model's, another
+## automapper's) in lanes beside the main one. They run on the main map's
+## clock and note spacing, so one moment sits on one line across all lanes.
+## Each is a community entry; _beside_info holds what was shown for each.
+var _beside: Array = []
+var _beside_info: Array = []
+var _names := PackedStringArray()
+## Where _lane() files new lanes: the main map's, or a map's beside it.
+var _lane_set := {}
+var _lane_parent: Node3D
+## Every lane's moving track, main and beside.
+var _tracks: Array[Node3D] = []
+## Distance between lane centres when maps are shown side by side.
+const BESIDE_GAP := 3.8
+var _beside_dialog: FileDialog
 var _frame: Array[Node3D] = []
 ## Lane edges of rotated lanes: shown in the overview cameras only.
 var _lane_lines: Array[Node3D] = []
@@ -124,7 +141,12 @@ func _ready() -> void:
 	songs.append_array(found)
 	_build_world()
 	_build_ui()
-	get_window().files_dropped.connect(func(files): _open_paths(Array(files)))
+	get_window().files_dropped.connect(_on_drop)
+	if args.has("names"):
+		_names = str(args.names).split(",")
+	for a in OS.get_cmdline_user_args():
+		if a.begins_with("--beside="):
+			_add_beside(a.trim_prefix("--beside="), false)
 	view_mode = args.get("view", "whole")
 	_set_cam(args.get("cam", "orbit"))
 	_snap = args.get("snap", "")
@@ -172,12 +194,12 @@ func _resolve(p: String) -> String:
 
 ## A file of the current song: index entries hold absolute paths, community
 ## maps names relative to their folder.
-func _file(name: String) -> String:
+func _file(name: String, entry: Dictionary = {}) -> String:
 	if name == "":
 		return ""
 	if name.is_absolute_path():
 		return name
-	var path := str(song.get("dir", "")).path_join(name)
+	var path := str((song if entry.is_empty() else entry).get("dir", "")).path_join(name)
 	# Maps made on Windows or macOS may differ in letter case from Info.dat,
 	# so match against the folder's real listing (case-insensitive disks
 	# would otherwise accept the wrong spelling).
@@ -421,6 +443,9 @@ func _load_difficulty(d: Dictionary) -> void:
 	_lanes.clear()
 	_lane_lines.clear()
 	_objects.clear()
+	_tracks.clear()
+	_lane_set = _lanes
+	_lane_parent = _map_root
 	map = MapData.new()
 	if not map.load_files(_file(d.beatmap), _file(d.lightshow), _file(song.audioData), float(song.bpm)):
 		_info.text = map.error
@@ -435,18 +460,9 @@ func _load_difficulty(d: Dictionary) -> void:
 		for o in list:
 			duration = maxf(duration, float(o.get("t_end", o.get("tt", o.t))) + 1.0)
 	_slider.max_value = duration
-	for o in map.notes:
-		_add_note(o)
-	for o in map.bombs:
-		var n := _mesh(_meshes.bomb, _mats.bomb)
-		_place(n, o.r, Vector3(MapData.lane_x(o.x), MapData.layer_y(o.y), -o.t * njs), o.t, o.t)
-	for o in map.walls:
-		_add_wall(o)
-	for o in map.arcs:
-		_add_arc(o)
-	for o in map.chains:
-		_add_chain(o)
+	_add_objects(map)
 	_add_beat_lines()
+	_build_beside()
 	_turns.assign(map.notes.duplicate())
 	_turns.sort_custom(func(a, b): return a.t < b.t)
 	_rotating = _lanes.size() > 1
@@ -500,20 +516,21 @@ func _resolve_palette() -> void:
 
 func _lane(rotation_deg: float) -> Node3D:
 	var key := snappedf(rotation_deg, 0.01)
-	if not _lanes.has(key):
+	if not _lane_set.has(key):
 		var pivot := Node3D.new()
 		# Positive lane rotation turns the lane to the player's right.
 		pivot.rotation.y = -deg_to_rad(rotation_deg)
 		var track := Node3D.new()
 		pivot.add_child(track)
-		_map_root.add_child(pivot)
+		_lane_parent.add_child(pivot)
+		_tracks.append(track)
 		if key != 0.0:
 			for i in 5:
 				var line := _static_bar(Vector3((i - 2) * MapData.LANE_SPACING, 0.005, -40), Vector3(0.015, 0.01, 80), _mats.beat, pivot)
 				line.visible = cam_mode != "player"
 				_lane_lines.append(line)
-		_lanes[key] = track
-	return _lanes[key]
+		_lane_set[key] = track
+	return _lane_set[key]
 
 
 func _mesh(mesh: Mesh, mat: Material) -> MeshInstance3D:
@@ -527,6 +544,20 @@ func _place(n: Node3D, rotation_deg: float, at: Vector3, t0: float, t1: float) -
 	n.position = at
 	_lane(rotation_deg).add_child(n)
 	_objects.append([n, t0, t1])
+
+
+func _add_objects(m: MapData) -> void:
+	for o in m.notes:
+		_add_note(o)
+	for o in m.bombs:
+		var n := _mesh(_meshes.bomb, _mats.bomb)
+		_place(n, o.r, Vector3(MapData.lane_x(o.x), MapData.layer_y(o.y), -o.t * njs), o.t, o.t)
+	for o in m.walls:
+		_add_wall(o)
+	for o in m.arcs:
+		_add_arc(o)
+	for o in m.chains:
+		_add_chain(o)
 
 
 func _add_note(o: Dictionary) -> void:
@@ -598,7 +629,7 @@ func _add_chain(o: Dictionary) -> void:
 
 ## A beat line on the floor for every beat (brighter each 4), with the bar
 ## and time, so spacing can be read against the music.
-func _add_beat_lines() -> void:
+func _add_beat_lines(labels := true) -> void:
 	var last := ceili(map.beat_of(duration))
 	var track := _lane(0.0)
 	for b in range(0, last + 1):
@@ -607,7 +638,7 @@ func _add_beat_lines() -> void:
 		n.scale = Vector3(4 * MapData.LANE_SPACING, 0.008, 0.02 if b % 4 == 0 else 0.01)
 		n.position = Vector3(0, 0.006, -t * njs)
 		track.add_child(n)
-		if b % 4 == 0:
+		if labels and b % 4 == 0:
 			var label := Label3D.new()
 			label.text = "bar %d  %s" % [b / 4 + 1, _clock(t)]
 			label.font_size = 48
@@ -761,8 +792,8 @@ func _process(delta: float) -> void:
 			now = duration
 			_pause()
 		_slider.set_value_no_signal(now)
-	for key in _lanes:
-		(_lanes[key] as Node3D).position.z = now * njs
+	for track in _tracks:
+		track.position.z = now * njs
 	if view_mode == "player":
 		for o in _objects:
 			(o[0] as Node3D).visible = o[2] >= now - 0.05 and o[1] <= now + lead_s
@@ -840,13 +871,18 @@ func _update_camera() -> void:
 		_facing_lane.visible = _rotating
 		_facing_lane.rotation.y = _facing
 		var turn := Basis(Vector3.UP, _facing)
-		_cam.position = turn * Vector3(0, MapData.HEAD_Y, 0.6)
-		_cam.rotation = Vector3(_look.y, _facing + _look.x, 0)
+		# With maps beside, step back and up behind the middle lane so every
+		# lane is in view, looking down the lanes as a player would.
+		var n := _beside.size()
+		var back := Vector3(_beside_center(), 0.5 + 0.5 * n, 1.5 + 2.2 * n) if n > 0 else Vector3.ZERO
+		_cam.position = turn * Vector3(0, MapData.HEAD_Y, 0.6) + back
+		_cam.rotation = Vector3(_look.y - (0.1 if n > 0 else 0.0), _facing + _look.x, 0)
 		return
 	_facing_lane.visible = false
 	var dir := Vector3(sin(_orbit.yaw) * cos(_orbit.pitch), -sin(_orbit.pitch), cos(_orbit.yaw) * cos(_orbit.pitch))
-	_cam.position = _orbit.target + dir * _orbit.dist
-	_cam.look_at(_orbit.target, Vector3.UP)
+	var target: Vector3 = _orbit.target + Vector3(_beside_center(), 0, 0)
+	_cam.position = target + dir * _orbit.dist * (1.0 + 0.4 * _beside.size())
+	_cam.look_at(target, Vector3.UP)
 
 
 func _unhandled_input(event: InputEvent) -> void:
@@ -891,6 +927,118 @@ static func _clock(t: float) -> String:
 	return "%d:%04.1f" % [int(t) / 60, fmod(t, 60.0)]
 
 
+# --- maps beside ---------------------------------------------------------------
+
+func _on_drop(files: PackedStringArray) -> void:
+	if Input.is_key_pressed(KEY_SHIFT) and map:
+		for f in files:
+			_add_beside(f)
+	else:
+		_open_paths(Array(files))
+
+
+func _add_beside(path: String, rebuild := true) -> void:
+	var entry := Community.open_path(_resolve(path))
+	if entry.is_empty() or entry.has("error"):
+		if _info:
+			_info.text = entry.get("error", "Not a map: %s" % path.get_file())
+		push_warning("beside: %s" % entry.get("error", path))
+		return
+	var problem := Community.materialize(entry, _cache)
+	if problem != "":
+		push_warning("beside: %s" % problem)
+		return
+	_beside.append(entry)
+	if rebuild and map:
+		_load_difficulty(diff)
+
+
+func _clear_beside() -> void:
+	_beside.clear()
+	if map:
+		_load_difficulty(diff)
+
+
+func _beside_center() -> float:
+	return _beside.size() * BESIDE_GAP / 2.0
+
+
+## The lane name: from --names, else the mapper, else the map's title.
+func _lane_name(k: int, entry: Dictionary) -> String:
+	if k < _names.size() and _names[k].strip_edges() != "":
+		return _names[k].strip_edges()
+	var mapper := str(entry.get("mapper", ""))
+	return mapper if mapper != "" else str(entry.get("title", "map"))
+
+
+## The difficulty of a map beside that matches the main one: same
+## characteristic and name, else that characteristic's hardest.
+func _matching_diff(entry: Dictionary) -> Dictionary:
+	for s in entry.get("sets", []):
+		if s.characteristic != set_entry.characteristic or s.difficulties.is_empty():
+			continue
+		for d in s.difficulties:
+			if d.name == diff.name:
+				return d
+		return s.difficulties[-1]
+	return {}
+
+
+func _lane_label(parent: Node3D, text: String) -> void:
+	var label := Label3D.new()
+	label.text = text
+	label.font_size = 56
+	label.pixel_size = 0.004
+	label.outline_size = 12
+	label.modulate = Color(0.85, 0.9, 1.0)
+	label.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+	# On the floor just in front of the lane, clear of the notes coming in.
+	label.position = Vector3(0, 0.2, 1.4)
+	parent.add_child(label)
+
+
+func _build_beside() -> void:
+	_beside_info.clear()
+	if _beside.is_empty():
+		return
+	var main_root := Node3D.new()
+	_map_root.add_child(main_root)
+	_lane_label(main_root, "%s\n%s · %d notes" % [_lane_name(0, song), diff.name, map.notes.size()])
+	for k in _beside.size():
+		var entry: Dictionary = _beside[k]
+		var root := Node3D.new()
+		root.position.x = (k + 1) * BESIDE_GAP
+		_map_root.add_child(root)
+		# The lane edges and the strike frame, as the main lane has.
+		for i in 5:
+			_static_bar(Vector3((i - 2) * MapData.LANE_SPACING, 0.005, -150), Vector3(0.015, 0.01, 300), _mats.grid, root)
+			_lane_lines.append(_static_bar(Vector3((i - 2) * MapData.LANE_SPACING, MapData.row_edge(1.5), 0), Vector3(0.012, MapData.row_edge(3) - MapData.row_edge(0), 0.012), _mats.grid, root))
+		for r in 4:
+			_lane_lines.append(_static_bar(Vector3(0, MapData.row_edge(r), 0), Vector3(4 * MapData.LANE_SPACING, 0.012, 0.012), _mats.grid, root))
+		var lane_name := _lane_name(k + 1, entry)
+		var d := _matching_diff(entry)
+		if d.is_empty():
+			_lane_label(root, "%s\nno %s map" % [lane_name, set_entry.characteristic])
+			_beside_info.append("%s: no %s map" % [lane_name, set_entry.characteristic])
+			continue
+		var other := MapData.new()
+		if not other.load_files(_file(d.beatmap, entry), _file(d.lightshow, entry), _file(str(entry.audioData), entry), float(entry.bpm)):
+			_lane_label(root, "%s\n%s" % [lane_name, other.error])
+			_beside_info.append("%s: %s" % [lane_name, other.error])
+			continue
+		_lane_set = {}
+		_lane_parent = root
+		_add_objects(other)
+		_add_beat_lines(false)
+		var shown := str(d.name) + ("" if d.name == diff.name else " (no %s)" % diff.name)
+		_lane_label(root, "%s\n%s · %d notes" % [lane_name, shown, other.notes.size()])
+		_beside_info.append("%s: %s, %d notes, %d walls, %d bombs, note speed %.1f" % [lane_name, shown, other.notes.size(), other.walls.size(), other.bombs.size(), float(d.njs)])
+	_lane_set = _lanes
+	_lane_parent = _map_root
+	for bar in _lane_lines:
+		bar.visible = cam_mode != "player"
+
+
 # --- interface ---------------------------------------------------------------
 
 func _build_ui() -> void:
@@ -926,6 +1074,28 @@ func _build_ui() -> void:
 	_file_dialog.file_selected.connect(func(p): _open_paths([p]))
 	_file_dialog.dir_selected.connect(func(p): _open_paths([p]))
 	add_child(_file_dialog)
+	var beside_row := HBoxContainer.new()
+	lv.add_child(beside_row)
+	var beside := Button.new()
+	beside.text = "Add a map beside…"
+	beside.tooltip_text = "Another map of this song in a lane beside it, on the same clock (or drop it with Shift held)"
+	beside.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	beside.pressed.connect(func(): _beside_dialog.popup_centered_ratio(0.6))
+	beside_row.add_child(beside)
+	var clear := Button.new()
+	clear.text = "Clear"
+	clear.tooltip_text = "Remove the maps beside"
+	clear.pressed.connect(_clear_beside)
+	beside_row.add_child(clear)
+	_beside_dialog = FileDialog.new()
+	_beside_dialog.title = "Add a map of this song beside it"
+	_beside_dialog.file_mode = FileDialog.FILE_MODE_OPEN_ANY
+	_beside_dialog.access = FileDialog.ACCESS_FILESYSTEM
+	_beside_dialog.use_native_dialog = true
+	_beside_dialog.filters = _file_dialog.filters
+	_beside_dialog.file_selected.connect(func(p): _add_beside(p))
+	_beside_dialog.dir_selected.connect(func(p): _add_beside(p))
+	add_child(_beside_dialog)
 	_search = LineEdit.new()
 	_search.placeholder_text = "Search title, artist, mapper, pack"
 	_search.text_changed.connect(func(_t): _fill_list())
@@ -1076,6 +1246,10 @@ func _update_info() -> void:
 		var moves: int = int(map.box_kinds.get(2, 0)) + int(map.box_kinds.get(3, 0))
 		if moves > 0:
 			lines.append("Plus %d light rotation/translation groups (not shown)" % moves)
+	if not _beside_info.is_empty():
+		lines.append("")
+		lines.append("Beside it, left to right (spaced at this map's note speed, %.1f):" % njs)
+		lines.append_array(_beside_info)
 	_info.text = "\n".join(lines)
 	var cover := _file(str(song.get("cover", "")))
 	var image := Image.load_from_file(cover) if cover != "" and FileAccess.file_exists(cover) else null
