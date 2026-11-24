@@ -107,7 +107,9 @@ class Windows:
     def mel(self, folder, key):
         path = os.path.join(folder, key + ".mel.npy")
         if path not in self.mels:
-            if len(self.mels) > 4096:
+            # Each memory map holds a file descriptor; containers often allow
+            # only 1024, so keep a few hundred open at most.
+            if len(self.mels) > 256:
                 self.mels.clear()
             self.mels[path] = np.load(path, mmap_mode="r")
         return self.mels[path]
