@@ -123,6 +123,8 @@ def main():
         s = score(real, gen, song["seconds"])
         s.update({"song": m["title"], "difficulty": G.NAMES[m["rank"]], "njsPredicted": njs, "njsReal": ref["njs"]})
         results.append(s)
+        if a.out:  # saved after every map, so a run cut short still leaves its scores
+            json.dump({"ckpt": a.ckpt, "step": ck.get("step"), "results": results}, open(a.out, "w"), indent=1)
         print(f"{m['title'][:28]:<28} {G.NAMES[m['rank']]:<10} timing F1 {s['timingF1']:.2f}  colour F1 {s['colourF1']:.2f}  "
               f"place {s['place']:.2f}  cut {s['cut']:.2f}  density {s['density']:.2f}  swing errors {s['swingErrors']:.1f} "
               f"(real {s['realSwingErrors']:.1f})  speed {njs} (real {ref['njs']:g})", flush=True)

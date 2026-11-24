@@ -132,14 +132,29 @@ def beatsaver_one(rec, out):
     return key, "ok", n
 
 
-def run_pool(jobs, out, workers):
+def run_pool(jobs, out, workers, max_minutes=0):
+    """Run the jobs with at most 2 x workers in flight; with max_minutes,
+    stop starting new ones at the deadline and finish those under way."""
     failed = open(os.path.join(out, "failed.jsonl"), "a")
     ok = skipped = bad = charts_done = 0
     start = time.time()
+    deadline = start + max_minutes * 60 if max_minutes else None
+    pending = iter(jobs)
+    futures = {}
+    i = 0
     with ProcessPoolExecutor(max_workers=workers) as pool:
-        futures = {pool.submit(fn, arg, out): label for fn, arg, label in jobs}
-        for i, fut in enumerate(as_completed(futures), 1):
-            label = futures[fut]
+        def top_up():
+            while len(futures) < workers * 2 and (deadline is None or time.time() < deadline):
+                job = next(pending, None)
+                if job is None:
+                    return
+                fn, arg, label = job
+                futures[pool.submit(fn, arg, out)] = label
+        top_up()
+        while futures:
+            fut = next(as_completed(futures))
+            label = futures.pop(fut)
+            i += 1
             try:
                 key, state, n = fut.result()
                 if state == "already":
@@ -151,9 +166,12 @@ def run_pool(jobs, out, workers):
                 bad += 1
                 failed.write(json.dumps({"map": label, "error": f"{type(error).__name__}: {error}"[:300]}) + "\n")
                 failed.flush()
-            if i % 25 == 0 or i == len(futures):
+            if i % 25 == 0 or not futures:
                 rate = i / max(time.time() - start, 1e-6)
-                print(f"{i}/{len(futures)}: {ok} prepared ({charts_done} charts), {skipped} already there, {bad} failed; {rate:.2f} songs/s", flush=True)
+                print(f"{i}/{len(jobs)}: {ok} prepared ({charts_done} charts), {skipped} already there, {bad} failed; {rate:.2f} songs/s", flush=True)
+            top_up()
+    if deadline is not None and time.time() >= deadline:
+        print(f"stopped at the {max_minutes} minute limit after {i} of {len(jobs)} songs", flush=True)
     failed.close()
     return ok, skipped, bad
 
@@ -188,11 +206,15 @@ def main():
     ap.add_argument("--out")
     ap.add_argument("--workers", type=int, default=4)
     ap.add_argument("--limit", type=int, default=0)
+    ap.add_argument("--max-minutes", type=float, default=0, help="stop starting new songs after this long")
+    ap.add_argument("--best-first", action="store_true", help="ranked, then curated, then highest rated first")
     a = ap.parse_args()
     out = a.out or os.path.join(ROOT, "library", "train", {"beatsaver": "beatsaver", "official": "official", "folder": "maps"}[a.source])
     os.makedirs(out, exist_ok=True)
     if a.source == "beatsaver":
         recs = [json.loads(line) for line in open(a.manifest)]
+        if a.best_first:
+            recs.sort(key=lambda r: (not (r.get("rankedSS") or r.get("rankedBL")), not r.get("curated"), -(r.get("score") or 0), r["id"]))
         jobs = [(beatsaver_one, r, r["id"]) for r in recs]
     elif a.source == "official":
         jobs = [(official_one, e, e["id"]) for e in json.load(open(a.index))["songs"]]
@@ -200,7 +222,7 @@ def main():
         jobs = [(folder_one, f, f) for f in a.folders]
     if a.limit:
         jobs = jobs[:a.limit]
-    ok, skipped, bad = run_pool(jobs, out, a.workers)
+    ok, skipped, bad = run_pool(jobs, out, a.workers, a.max_minutes)
     print(f"done: {ok} prepared, {skipped} already there, {bad} failed -> {out}")
 
 

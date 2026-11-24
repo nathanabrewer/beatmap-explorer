@@ -96,6 +96,8 @@ def main():
     ap.add_argument("--chars", help="only these characteristics, e.g. Standard,OneSaber")
     ap.add_argument("--workers", type=int, default=4)
     ap.add_argument("--seed", type=int, default=0)
+    ap.add_argument("--max-minutes", type=float, default=0, help="stop after this long; the learning-rate schedule follows the clock")
+    ap.add_argument("--save-minutes", type=float, default=0, help="also save last.pt this often")
     a = ap.parse_args()
     os.makedirs(a.out, exist_ok=True)
     torch.manual_seed(a.seed)
@@ -123,9 +125,19 @@ def main():
     best = math.inf
     stream = batches(train, a.batch, a.seed, a.workers)
     t0, seen = time.time(), 0
+    last_save = t0
     model.train()
+
+    def checkpoint(step, val=None):
+        ck = {"model": model.state_dict(), "config": model.config, "step": step, "heldout": val, "args": vars(a)}
+        torch.save(ck, os.path.join(a.out, "last.pt"))
+        return ck
+
     for step in range(start_step + 1, a.steps + 1):
-        lr = a.lr * min(1.0, step / a.warmup) * 0.5 * (1 + math.cos(math.pi * min(step / a.steps, 1.0)))
+        progress = step / a.steps
+        if a.max_minutes:
+            progress = max(progress, (time.time() - t0) / (a.max_minutes * 60))
+        lr = a.lr * min(1.0, step / a.warmup) * 0.5 * (1 + math.cos(math.pi * min(progress, 1.0)))
         for g in opt.param_groups:
             g["lr"] = lr
         mels, inp, tgt, mask = (t.to(dev, non_blocking=True) for t in next(stream))
@@ -140,17 +152,27 @@ def main():
         if step % 50 == 0:
             rate = seen / (time.time() - t0)
             print(f"step {step} loss {float(loss):.4f} lr {lr:.2e} {rate:.1f} windows/s", flush=True)
-        if step % a.eval_every == 0 or step == a.steps:
+        out_of_time = a.max_minutes and progress >= 1.0
+        if a.save_minutes and time.time() - last_save > a.save_minutes * 60:
+            checkpoint(step)
+            last_save = time.time()
+        if step % a.eval_every == 0 or step == a.steps or out_of_time:
             val, njs_acc = evaluate(model, test, dev) if len(test) else (float("nan"), float("nan"))
             row = {"step": step, "train": float(loss), "heldout": val, "njsAccuracy": njs_acc, "lr": lr, "time": time.time()}
             log.write(json.dumps(row) + "\n")
             log.flush()
             print(f"== step {step}: held-out loss {val:.4f}, note speed right {njs_acc:.0%}", flush=True)
-            ck = {"model": model.state_dict(), "config": model.config, "step": step, "heldout": val, "args": vars(a)}
-            torch.save(ck, os.path.join(a.out, "last.pt"))
+            ck = checkpoint(step, val)
+            last_save = time.time()
             if val < best:
                 best = val
                 torch.save(ck, os.path.join(a.out, "best.pt"))
+        if out_of_time:
+            print(f"stopped at the {a.max_minutes} minute limit, step {step}", flush=True)
+            break
+    if not os.path.exists(os.path.join(a.out, "best.pt")) and os.path.exists(os.path.join(a.out, "last.pt")):
+        import shutil
+        shutil.copyfile(os.path.join(a.out, "last.pt"), os.path.join(a.out, "best.pt"))
     print(f"done; best held-out loss {best:.4f}", flush=True)
 
 
