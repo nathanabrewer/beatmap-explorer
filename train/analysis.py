@@ -225,7 +225,7 @@ def main():
             row["genSeconds"] = secs
             rows.append(row)
             count += 1
-        methods.append({k: m[k] for k in ("id", "name", "slot", "note", "from") if k in m} | {"maps": count, "pending": count == 0})
+        methods.append({k: m[k] for k in ("id", "name", "slot", "note", "from", "about") if k in m} | {"maps": count, "pending": count == 0})
         print(f"{m['name']}: {count} maps", flush=True)
     # Onset snapping at several windows, for each method that writes its own maps.
     snapping = []
@@ -250,11 +250,15 @@ def main():
     page = {"title": spec.get("title", "Map makers compared"), "subtitle": spec.get("subtitle", ""), "built": spec.get("built", ""),
             "difficulties": diffs, "songs": songs, "methods": methods, "rows": rows, "real": real_out, "snapping": snapping,
             "runs": [read_run(r) for r in spec.get("runs", [])], "speed": spec.get("speed", []), "notes": spec.get("notes", []),
-            "offsetBins": OFFSET_BINS, "densityBin": DENSITY_BIN, "shifts": SHIFTS}
+            "realAbout": spec.get("realAbout", {}), "offsetBins": OFFSET_BINS, "densityBin": DENSITY_BIN, "shifts": SHIFTS}
     blob = json.dumps(page, separators=(",", ":")).replace("</", "<\\/")
     html = open(os.path.join(HERE, "analysis.html")).read().replace('"__DATA__"', blob)
     os.makedirs(os.path.dirname(os.path.abspath(out_path)), exist_ok=True)
     open(out_path, "w").write(html)
+    # For report_server.py: the song files it may serve, by song key.
+    audio = {s["key"]: s["audio"][len("file://"):] for s in songs if s.get("audio")}
+    if audio:
+        json.dump(audio, open(os.path.join(os.path.dirname(os.path.abspath(out_path)), "audio.json"), "w"), indent=1)
     print(f"wrote {out_path}: {len(songs)} songs, {len(rows)} maps, {len(html) / 1e6:.1f} MB")
 
 
