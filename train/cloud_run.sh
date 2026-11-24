@@ -67,7 +67,8 @@ if [ "$songs" -lt "${MIN_SONGS:-50}" ]; then
   stamp "too few songs to train on; stopping (see prepare-failed.jsonl)"; exit 1
 fi
 stamp "training for ${TRAIN_MINUTES:-22} minutes"
-python3 -I train/train.py --data "$data" --out "$out/run" --size "${SIZE:-small}" --steps 1000000 --batch "${BATCH:-64}" \
+# Fewer, growable memory blocks: batches change shape every step.
+PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True python3 -I train/train.py --data "$data" --out "$out/run" --size "${SIZE:-small}" --steps 1000000 --batch "${BATCH:-64}" \
   --lr "${LR:-4e-4}" --warmup "${WARMUP:-500}" --workers 8 --eval-every 1500 --max-minutes "${TRAIN_MINUTES:-22}" --save-minutes "${SAVE_MINUTES:-4}" > "$out/train.log" 2>&1
 grep -E '^(==|stopped|done|model|batch [0-9]|[0-9]+ training)' "$out/train.log" | tail -7
 stamp "scoring held-out maps"

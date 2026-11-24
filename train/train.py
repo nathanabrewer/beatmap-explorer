@@ -61,17 +61,26 @@ def batches(ds, batch, seed, workers=4, depth=8):
         yield q.get()
 
 
+HEADROOM = 0.8
+
+
 def fit_batch(model, batch, dev):
-    """The largest batch, at most `batch`, whose worst case fits the card.
-    Batches pad to their longest window, so one batch of dense windows can be
-    far bigger than the average; the worst case (every window at the token
-    limit) is tried once here, with room for the optimizer, instead of being
-    met hours into a run."""
+    """The largest batch, at most `batch`, whose worst case fits the card
+    with room to spare. Batches pad to their longest window, so one batch of
+    dense windows can be far bigger than the average; the worst case (every
+    window at the token limit) is tried once here, with room for the
+    optimizer, instead of being met hours into a run. Merely fitting is not
+    enough: a card filled to the brim spends its time freeing and
+    re-allocating memory (a 202M model at batch 64 on an 80 GB H100 kept
+    the GPU idle most of the time), so the worst case must stay under
+    HEADROOM of the card."""
     if dev.type != "cuda":
         return batch
     n_mels, frames, max_len = model.config["n_mels"], model.config["frames"], model.config["max_len"]
+    total = torch.cuda.get_device_properties(dev).total_memory
     while True:
         fits = True
+        torch.cuda.reset_peak_memory_stats(dev)
         try:
             reserve = [torch.empty_like(p) for p in model.parameters() for _ in range(2)]  # AdamW's two moments
             mels = torch.zeros(batch, frames, n_mels, device=dev)
@@ -81,12 +90,15 @@ def fit_batch(model, batch, dev):
             F.cross_entropy(logits.float().flatten(0, 1), inp.flatten()).backward()
         except torch.OutOfMemoryError:
             fits = False
+        peak = torch.cuda.max_memory_allocated(dev)
         reserve = mels = inp = logits = None
         model.zero_grad(set_to_none=True)
         torch.cuda.empty_cache()
-        if fits or batch <= 4:
+        roomy = fits and peak <= HEADROOM * total
+        print(f"worst-case batch of {batch}: " + (f"{peak / 1e9:.1f} of {total / 1e9:.1f} GB" if fits else "does not fit"), flush=True)
+        if roomy or batch <= 4:
             return batch
-        print(f"a worst-case batch of {batch} does not fit this card; trying {batch // 2}", flush=True)
+        print(f"trying {batch // 2} (the worst case must stay under {HEADROOM:.0%} of the card)", flush=True)
         batch //= 2
 
 
