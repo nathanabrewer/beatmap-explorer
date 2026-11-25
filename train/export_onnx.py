@@ -62,7 +62,7 @@ def main():
     # PyTorch's fused inference path for transformer layers has no ONNX form.
     torch.backends.mha.set_fastpath_enabled(False)
     if a.check_mel:
-        mel = np.load(a.check_mel + ".mel.npy").astype(np.float32)[: T.N_TIME]
+        mel = prepare.mel_float(prepare.read_mel(a.check_mel + ".mel.npy"))[: T.N_TIME]
     else:
         mel = np.random.default_rng(0).normal(-6, 3, (T.N_TIME, prepare.N_MELS)).astype(np.float32)
     x = torch.tensor(mel).unsqueeze(0)

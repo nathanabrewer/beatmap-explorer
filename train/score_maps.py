@@ -24,9 +24,11 @@ import prepare  # noqa: E402
 
 def read_any(path):
     if path.lower().endswith(".zip"):
-        tmp = tempfile.mkdtemp(prefix="bx-score-")
-        prepare.safe_unzip(path, tmp)
-        return charts.read_folder(prepare.map_root(tmp))
+        # Charts are read into memory, so the unpacked copy (song audio
+        # included, which may be private) is removed straight away.
+        with tempfile.TemporaryDirectory(prefix="bx-score-") as tmp:
+            prepare.safe_unzip(path, tmp)
+            return charts.read_folder(prepare.map_root(tmp))
     return charts.read_folder(path)
 
 

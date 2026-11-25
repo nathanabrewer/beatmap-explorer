@@ -22,3 +22,5 @@ bundle
 *.jpg
 !docs/*.png
 !docs/results/*.png
+train/run.env
+web/mapviewer/demo/*.mp3

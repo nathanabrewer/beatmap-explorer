@@ -140,13 +140,15 @@ def window_mel(mel, start):
 def predict_njs(model, mel, rank, char, dev, C):
     memory = model.encode(torch.tensor(window_mel(mel, 0), device=dev).unsqueeze(0))
     header = torch.tensor([T.header(rank, char, 16)[:3]], device=dev)
-    logits = model.decode(memory, header)[0, -1].float()
+    logits = model.decode(memory, header)[0, -1].float().cpu()
     return int(T.NAMES[int(logits.masked_fill(~C["njs"], float("-inf")).argmax())][4:])
 
 
 def generate_difficulty(model, mel, rank, char, dev, temperature, rules, seed):
     torch.manual_seed(seed)
-    C = classes(dev)
+    # The rule masks and the sampling run on the CPU: per token they are a few
+    # dozen tiny operations, slower on a GPU than the one copy of the logits.
+    C = classes(torch.device("cpu"))
     frames = mel.shape[0]
     njs = predict_njs(model, mel, rank, char, dev, C)
     step = int((T.WINDOW - T.CONTEXT) * T.TICKS)
@@ -273,7 +275,8 @@ def main():
     model.load_state_dict(ck["model"])
     model.to(dev).eval()
     if a.prepared:
-        mel = np.load(a.prepared + ".mel.npy").astype(np.float32)
+        from prepare import mel_float, read_mel
+        mel = mel_float(read_mel(a.prepared + ".mel.npy"))
         song = json.load(gzip.open(a.prepared + ".json.gz", "rt"))
         title, artist, bpm = a.title or song.get("title", ""), a.artist or song.get("artist", ""), float(song.get("bpm") or 120)
         audio = a.song_audio

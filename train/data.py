@@ -8,7 +8,10 @@ is learned too.
 
 Songs are split by a hash of their title and artist (not by map), so the
 held-out set has songs the model never heard; `holdout` is the fraction kept
-out (2 % by default).
+out (2 % by default). A list of test songs (read_test_songs) is held out in
+every source on top of that, matched by title alone: the same song often has
+maps in several sources with the artist written differently, and a map of a
+test song from any source must never be trained on.
 """
 import glob
 import gzip
@@ -16,10 +19,12 @@ import hashlib
 import json
 import os
 import random
+import re
 from concurrent.futures import ProcessPoolExecutor
 
 import numpy as np
 
+import prepare as P
 import tokens as T
 
 SILENCE = float(np.log(1e-6))
@@ -27,7 +32,24 @@ FRAMES = int(T.WINDOW * T.TICKS)
 CTX = int(T.CONTEXT * T.TICKS)
 
 
-def song_split(song, holdout):
+def title_key(title):
+    """A song title reduced to its words: case, punctuation and bracketed
+    parts like (feat. X) or [Chroma] ignored."""
+    t = re.sub(r"\(.*?\)|\[.*?\]", " ", str(title).lower())
+    return " ".join(w for w in re.findall(r"[a-z0-9$]+", t) if w not in ("the", "a", "and", "feat", "ft"))
+
+
+def read_test_songs(path):
+    """Test songs, one title per line (anything after a | is a note)."""
+    if not path:
+        return None
+    keys = {title_key(line.split("|")[0]) for line in open(path) if line.strip() and not line.startswith("#")}
+    return keys - {""}
+
+
+def song_split(song, holdout, test_songs=None):
+    if test_songs and title_key(song.get("title", "")) in test_songs:
+        return "test"
     key = f"{song.get('title', '').strip().lower()}|{song.get('artist', '').strip().lower()}"
     h = int(hashlib.sha1(key.encode()).hexdigest()[:8], 16) / 0xFFFFFFFF
     return "test" if h < holdout else "train"
@@ -81,7 +103,7 @@ def compile_dir(folder, workers=8):
 class Windows:
     """Random training windows over the charts of one or more prepared folders."""
 
-    def __init__(self, folders, split="train", holdout=0.02, ranks=None, chars=None, seed=0):
+    def __init__(self, folders, split="train", holdout=0.02, ranks=None, chars=None, seed=0, test_songs=None, drop=None):
         self.items = []  # (folder, meta, ticks, toks, rots)
         self.mels = {}
         for folder in folders:
@@ -91,7 +113,9 @@ class Windows:
             meta, off = json.loads(str(z["meta"])), z["offsets"]
             all_ticks, all_toks, all_rots = z["ticks"], z["toks"], z["rots"]
             for i, m in enumerate(meta):
-                if song_split(m, holdout) != split:
+                if drop and title_key(m.get("title", "")) in drop:
+                    continue
+                if song_split(m, holdout, test_songs) != split:
                     continue
                 if (ranks and m["rank"] not in ranks) or (chars and m["char"] not in chars):
                     continue
@@ -111,7 +135,7 @@ class Windows:
             # only 1024, so keep a few hundred open at most.
             if len(self.mels) > 256:
                 self.mels.clear()
-            self.mels[path] = np.load(path, mmap_mode="r")
+            self.mels[path] = P.read_mel(path, mmap=True)
         return self.mels[path]
 
     def sample(self, rng=None):
@@ -136,7 +160,7 @@ class Windows:
         x = np.full((FRAMES, mel.shape[1]), SILENCE, dtype=np.float32)
         a, b = max(start, 0), min(start + FRAMES, mel.shape[0])
         if b > a:
-            x[a - start:b - start] = mel[a:b]
+            x[a - start:b - start] = P.mel_float(mel[a:b])
         return x, toks_out, sep
 
 

@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Map viewer demo</title>
+<style>
+  body { margin: 0; background: #060a12; color: #c3c2b7; font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  main { max-width: 1100px; margin: 0 auto; padding: 20px; }
+  h1 { color: #f0efec; font-size: 22px; margin: 0 0 4px; }
+  canvas { width: 100%; height: 560px; display: block; border-radius: 10px; background: #060a12; }
+  .row { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; margin: 10px 0; }
+  select, button, input { font: inherit; color: #f0efec; background: #1a1a19; border: 1px solid rgba(255,255,255,0.12); border-radius: 6px; padding: 5px 10px; }
+  audio { width: 100%; }
+  .credit { font-size: 12px; color: #898781; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Map viewer</h1>
+  <p>A map played in 3D: blocks fly down the lane at the map's note speed, and the figure swings what the map asks for. Open your own map below, or play the demo.</p>
+  <canvas id="view"></canvas>
+  <div class="row">
+    <span>View <button data-cam="behind">Behind</button> <button data-cam="eyes0">Player's eyes</button> <button data-cam="side">Side</button> <button data-cam="top">Top</button> <button data-cam="wide">Wide</button></span>
+    <span style="color:#898781">Drag to orbit, right-drag to pan, scroll to zoom.</span>
+    <label>Sound delay <input id="delay" type="number" value="0" step="10" style="width:70px"> ms</label>
+    <label>Your map: difficulty file <input id="chart" type="file" accept=".dat,.json"></label>
+    <label>BPM <input id="bpm" type="number" value="120" style="width:70px"></label>
+    <label>song <input id="song" type="file" accept="audio/*"></label>
+  </div>
+  <audio id="audio" controls preload="auto"></audio>
+  <p class="credit" id="credit"></p>
+</main>
+<script type="module">
+import * as THREE from './vendor/three.min.js';
+import { createMapViewer, notesFromChart } from './mapviewer.js';
+const $ = (id) => document.getElementById(id);
+const viewer = createMapViewer($('view'), { three: THREE });
+const audio = $('audio');
+viewer.follow(audio);
+document.querySelectorAll('[data-cam]').forEach((b) => { b.onclick = () => viewer.camera(b.dataset.cam); });
+$('delay').onchange = (e) => { viewer.soundDelay = (+e.target.value || 0) / 1000; };
+// The demo: a generated map of a CC BY track.
+try {
+  const demo = await (await fetch('demo/map.json')).json();
+  viewer.load([{ notes: demo.notes, njs: demo.njs, name: demo.name }]);
+  audio.src = 'demo/' + demo.audio;
+  $('credit').textContent = 'Demo music: ' + demo.credit;
+  viewer.seek(demo.start || 0); audio.currentTime = demo.start || 0;
+} catch (e) { $('credit').textContent = 'No demo map found; open your own below.'; }
+// Your own map: a difficulty file (v2 or v3) and its song, read in the browser, never uploaded.
+async function openOwn() {
+  const f = $('chart').files[0]; if (!f) return;
+  const chart = JSON.parse(await f.text());
+  viewer.load([{ notes: notesFromChart(chart, +$('bpm').value || 120), njs: 16, name: f.name }]);
+  const s = $('song').files[0]; if (s) { audio.src = URL.createObjectURL(s); $('credit').textContent = ''; }
+  audio.currentTime = 0; viewer.seek(0);
+}
+$('chart').onchange = openOwn; $('song').onchange = openOwn;
+</script>
+</body>
+</html>

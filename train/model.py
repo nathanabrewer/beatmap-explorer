@@ -14,6 +14,13 @@ import torch.nn.functional as F
 
 import tokens as T
 
+# PyTorch can route attention through cuDNN on H100-class cards, and cuDNN
+# builds a plan for every new sequence length. Map windows vary in length
+# from batch to batch (and while writing a map, every token is a new
+# length), so a 202M model ran at 2.9 s per step instead of 0.2 s with the
+# GPU idle. The other attention kernels need no per-length plan.
+torch.backends.cuda.enable_cudnn_sdp(False)
+
 SIZES = {
     "tiny": dict(d=256, heads=4, enc=4, dec=4),
     "small": dict(d=384, heads=6, enc=6, dec=6),
@@ -75,17 +82,77 @@ class MapModel(nn.Module):
     def forward(self, mel, tokens):
         return self.decode(self.encode(mel), tokens)
 
+    # --- decoding with a cache --------------------------------------------
+    # decode() reads the whole token sequence again for every new token. While
+    # writing a map, the same result comes from keeping each decoder layer's
+    # keys and values for the tokens so far, and the audio's keys and values
+    # (computed once per window): each new token then costs only itself.
+
+    def _split(self, x):
+        b, n, d = x.shape
+        h = self.decoder.layers[0].self_attn.num_heads
+        return x.view(b, n, h, d // h).transpose(1, 2)
+
+    @staticmethod
+    def _merge(x):
+        b, h, n, e = x.shape
+        return x.transpose(1, 2).reshape(b, n, h * e)
+
+    def audio_keys(self, memory):
+        """Each decoder layer's keys and values over the encoded audio."""
+        out = []
+        for layer in self.decoder.layers:
+            w, b = layer.multihead_attn.in_proj_weight, layer.multihead_attn.in_proj_bias
+            d = w.shape[1]
+            out.append((self._split(F.linear(memory, w[d:2 * d], b[d:2 * d])), self._split(F.linear(memory, w[2 * d:], b[2 * d:]))))
+        return out
+
+    def decode_step(self, tokens, start, cache, audio):
+        """Logits for `tokens` at positions start.. given the tokens before them
+        in `cache` (one (keys, values) per layer, None when empty), which it
+        extends. Several tokens at once only from position 0 (the prefix)."""
+        n = tokens.shape[1]
+        assert n == 1 or start == 0
+        x = self.embed(tokens) + self.pos(torch.arange(start, start + n, device=tokens.device))
+        for i, layer in enumerate(self.decoder.layers):
+            q, k, v = F.linear(layer.norm1(x), layer.self_attn.in_proj_weight, layer.self_attn.in_proj_bias).chunk(3, dim=-1)
+            q, k, v = self._split(q), self._split(k), self._split(v)
+            if cache[i] is not None:
+                k, v = torch.cat([cache[i][0], k], 2), torch.cat([cache[i][1], v], 2)
+            cache[i] = (k, v)
+            x = x + layer.self_attn.out_proj(self._merge(F.scaled_dot_product_attention(q, k, v, is_causal=n > 1)))
+            w, b = layer.multihead_attn.in_proj_weight, layer.multihead_attn.in_proj_bias
+            d = w.shape[1]
+            q = self._split(F.linear(layer.norm2(x), w[:d], b[:d]))
+            x = x + layer.multihead_attn.out_proj(self._merge(F.scaled_dot_product_attention(q, *audio[i])))
+            x = x + layer.linear2(layer.activation(layer.linear1(layer.norm3(x))))
+        return self.head(self.dec_norm(x))
+
     @torch.no_grad()
-    def generate(self, mel, prefix, max_new=600, temperature=0.9, top_p=0.95, allow=None):
+    def generate(self, mel, prefix, max_new=600, temperature=0.9, top_p=0.95, allow=None, cache=True):
         """Continue `prefix` (token ids) for one window until EOS.
         `allow(tokens_so_far) -> bool tensor over the vocabulary or None`
-        lets the caller forbid tokens (grammar and playability)."""
+        lets the caller forbid tokens (grammar and playability). cache=False
+        re-reads the whole sequence for every token (the reference for the
+        cached path; also used past max_len, where positions slide)."""
         self.eval()
         memory = self.encode(mel.unsqueeze(0))
         toks = list(prefix)
+        max_len = self.config["max_len"]
+        cached = cache and len(toks) <= max_len
+        if cached:
+            layers = [None] * len(self.decoder.layers)
+            audio = self.audio_keys(memory)
+            next_logits = self.decode_step(torch.tensor([toks], device=mel.device), 0, layers, audio)[0, -1].float()
         for _ in range(max_new):
-            inp = torch.tensor([toks[-self.config["max_len"]:]], device=mel.device)
-            logits = self.decode(memory, inp)[0, -1].float()
+            if cached and len(toks) > max_len:
+                cached = False
+            if cached:
+                logits = next_logits
+            else:
+                inp = torch.tensor([toks[-max_len:]], device=mel.device)
+                logits = self.decode(memory, inp)[0, -1].float()
+            logits = logits.cpu()   # sampling and the caller's rules run on the CPU
             if allow is not None:
                 ok = allow(toks)
                 if ok is not None:
@@ -101,6 +168,8 @@ class MapModel(nn.Module):
             toks.append(nxt)
             if nxt == T.EOS:
                 break
+            if cached and len(toks) <= max_len:
+                next_logits = self.decode_step(torch.tensor([[nxt]], device=mel.device), len(toks) - 1, layers, audio)[0, -1].float()
         return toks
 
 

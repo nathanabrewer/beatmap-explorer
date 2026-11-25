@@ -1,12 +1,15 @@
 """Stage what a rented GPU gets: the training code and the BeatSaver list, nothing else.
 
-    python3 -I train/stage.py ~/GPU-runs/stage/NAME [--manifest library/train/manifest.jsonl]
+    python3 -I train/stage.py ~/GPU-runs/stage/NAME [--manifest library/train/manifest.jsonl] [--secrets FILE.env]
 
 Foreman uploads a whole folder, and this project's library/ holds files that
 must stay on this machine (levels extracted from your own copy of the game,
 covers, caches). So the upload is a fresh folder holding only train/*.py,
 train/cloud_run.sh, train/requirements.txt and train/dataset/manifest.jsonl,
-and this refuses to finish if anything else is there.
+and this refuses to finish if anything else is there. --secrets copies an
+env file (the run bucket and its key) in as train/run.env, mode 600, which
+cloud_run.sh reads on the machine: the key then never passes through the
+launcher's run settings or records.
 """
 import os
 import shutil
@@ -32,7 +35,12 @@ def main():
         if f.endswith(".py") or f in ("cloud_run.sh", "requirements.txt"):
             shutil.copy2(os.path.join(HERE, f), os.path.join(dest, "train", f))
     shutil.copy2(manifest, os.path.join(dest, "train", "dataset", "manifest.jsonl"))
-    allowed_ext = (".py", ".sh", ".txt", ".jsonl")
+    if "--secrets" in sys.argv:
+        src = os.path.expanduser(sys.argv[sys.argv.index("--secrets") + 1])
+        target = os.path.join(dest, "train", "run.env")
+        shutil.copyfile(src, target)
+        os.chmod(target, 0o600)
+    allowed_ext = (".py", ".sh", ".txt", ".jsonl", "run.env")
     total = 0
     for base, _, files in os.walk(dest):
         for f in files:

@@ -40,6 +40,12 @@ No songs, maps or game files come with this project.
   V view · Tab song list.
 - The info panel shows note jump speed, landing distance, environment and light
   cues. Newer light shows also get a board that lights up each light group.
+- **Maps side by side:** compare several maps of one song (the real one, a
+  model's, another automapper's) in lanes beside each other, on one clock and
+  one note spacing, so the same moment sits on the same line in every lane.
+  Use "Add a map beside…", drop a map with Shift held, or start with
+  `./run.sh --open=REAL --beside=MAP2 --beside=MAP3 --names="Real,Model,Other"`.
+  The player camera then steps back to see every lane.
 
 ## mapkit
 

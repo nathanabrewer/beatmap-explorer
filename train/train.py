@@ -31,6 +31,18 @@ import tokens as T  # noqa: E402
 from model import MapModel, parameters_m  # noqa: E402
 
 
+def cpu_budget():
+    """CPUs this process may use: the container's quota where there is one
+    (os.cpu_count() reports the whole host)."""
+    try:
+        q, p = open("/sys/fs/cgroup/cpu.max").read().split()[:2]
+        if q != "max":
+            return max(1, int(int(q) / int(p)))
+    except (OSError, ValueError):
+        pass
+    return len(os.sched_getaffinity(0)) if hasattr(os, "sched_getaffinity") else (os.cpu_count() or 1)
+
+
 def device():
     if torch.cuda.is_available():
         return torch.device("cuda")
@@ -59,6 +71,47 @@ def batches(ds, batch, seed, workers=4, depth=8):
         threading.Thread(target=work, args=(k,), daemon=True).start()
     while True:
         yield q.get()
+
+
+HEADROOM = 0.8
+
+
+def fit_batch(model, batch, dev):
+    """The largest batch, at most `batch`, whose worst case fits the card
+    with room to spare. Batches pad to their longest window, so one batch of
+    dense windows can be far bigger than the average; the worst case (every
+    window at the token limit) is tried once here, with room for the
+    optimizer, instead of being met hours into a run. Merely fitting is not
+    enough: a card filled to the brim spends its time freeing and
+    re-allocating memory (a 202M model at batch 64 on an 80 GB H100 kept
+    the GPU idle most of the time), so the worst case must stay under
+    HEADROOM of the card."""
+    if dev.type != "cuda":
+        return batch
+    n_mels, frames, max_len = model.config["n_mels"], model.config["frames"], model.config["max_len"]
+    total = torch.cuda.get_device_properties(dev).total_memory
+    while True:
+        fits = True
+        torch.cuda.reset_peak_memory_stats(dev)
+        try:
+            reserve = [torch.empty_like(p) for p in model.parameters() for _ in range(2)]  # AdamW's two moments
+            mels = torch.zeros(batch, frames, n_mels, device=dev)
+            inp = torch.full((batch, max_len), T.SEP, dtype=torch.long, device=dev)
+            with torch.autocast(dev.type, dtype=torch.bfloat16):
+                logits = model(mels, inp)
+            F.cross_entropy(logits.float().flatten(0, 1), inp.flatten()).backward()
+        except torch.OutOfMemoryError:
+            fits = False
+        peak = torch.cuda.max_memory_allocated(dev)
+        reserve = mels = inp = logits = None
+        model.zero_grad(set_to_none=True)
+        torch.cuda.empty_cache()
+        roomy = fits and peak <= HEADROOM * total
+        print(f"worst-case batch of {batch}: " + (f"{peak / 1e9:.1f} of {total / 1e9:.1f} GB" if fits else "does not fit"), flush=True)
+        if roomy or batch <= 4:
+            return batch
+        print(f"trying {batch // 2} (the worst case must stay under {HEADROOM:.0%} of the card)", flush=True)
+        batch //= 2
 
 
 def mel_stats(ds, n=200):
@@ -96,6 +149,7 @@ def main():
     ap.add_argument("--lr", type=float, default=3e-4)
     ap.add_argument("--warmup", type=int, default=2000)
     ap.add_argument("--holdout", type=float, default=0.02)
+    ap.add_argument("--test-songs", help="a file of song titles held out from training in every source (see data.read_test_songs)")
     ap.add_argument("--eval-every", type=int, default=1000)
     ap.add_argument("--init")
     ap.add_argument("--ranks", help="only these difficulties, e.g. 3,4 (0 Easy .. 4 Expert+)")
@@ -104,18 +158,35 @@ def main():
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--max-minutes", type=float, default=0, help="stop after this long; the learning-rate schedule follows the clock")
     ap.add_argument("--save-minutes", type=float, default=0, help="also save last.pt this often")
+    ap.add_argument("--state", help="where resume.pt goes (model, optimizer, step, time used): default --out")
+    ap.add_argument("--resume", help="a resume.pt to continue from: same step, optimizer, learning-rate schedule and clock")
     a = ap.parse_args()
     os.makedirs(a.out, exist_ok=True)
+    # The CPU side only cuts windows and launches kernels; a pool as wide as
+    # a big host starves the GPU (see cloud_run.sh).
+    torch.set_num_threads(min(6, cpu_budget()))
     torch.manual_seed(a.seed)
     dev = device()
     ranks = {int(r) for r in a.ranks.split(",")} if a.ranks else None
     chars = set(a.chars.split(",")) if a.chars else None
-    train = D.Windows(a.data, "train", a.holdout, ranks=ranks, chars=chars, seed=a.seed)
-    test = D.Windows(a.data, "test", a.holdout, ranks=ranks, chars=chars, seed=a.seed + 1)
+    test_songs = D.read_test_songs(a.test_songs)
+    train = D.Windows(a.data, "train", a.holdout, ranks=ranks, chars=chars, seed=a.seed, test_songs=test_songs)
+    # The held-out loss (which picks best.pt) uses the hash-held-out songs
+    # only: choosing a checkpoint by its score on the test songs would leak
+    # them into the result.
+    test = D.Windows(a.data, "test", a.holdout, ranks=ranks, chars=chars, seed=a.seed + 1, drop=test_songs)
     print(f"{len(train)} training charts, {len(test)} held-out charts; device {dev}", flush=True)
     model = MapModel(a.size)
-    start_step = 0
-    if a.init:
+    start_step, used, resumed = 0, 0.0, None
+    state_dir = a.state or a.out
+    os.makedirs(state_dir, exist_ok=True)
+    if a.resume:
+        resumed = torch.load(a.resume, map_location="cpu", weights_only=False)
+        model = MapModel(resumed["config"]["size"])
+        model.load_state_dict(resumed["model"])
+        start_step, used = resumed["step"], resumed["used"]
+        print(f"resuming from {a.resume}: step {start_step}, {used / 60:.1f} minutes of training used", flush=True)
+    elif a.init:
         ck = torch.load(a.init, map_location="cpu")
         model = MapModel(ck["config"]["size"])
         model.load_state_dict(ck["model"])
@@ -126,17 +197,29 @@ def main():
         model.mel_std.fill_(std)
     model.to(dev)
     print(f"model {model.config['size']}: {parameters_m(model):.1f} M parameters", flush=True)
+    a.batch = resumed["batch"] if resumed else fit_batch(model, a.batch, dev)
+    print(f"batch {a.batch}", flush=True)
     opt = torch.optim.AdamW(model.parameters(), lr=a.lr, betas=(0.9, 0.98), weight_decay=0.01)
+    if resumed:
+        opt.load_state_dict(resumed["optimizer"])
     log = open(os.path.join(a.out, "log.jsonl"), "a")
-    best = math.inf
-    stream = batches(train, a.batch, a.seed, a.workers)
-    t0, seen = time.time(), 0
-    last_save = t0
+    best = resumed["best"] if resumed else math.inf
+    stream = batches(train, a.batch, a.seed + start_step, a.workers)
+    # t0 is moved back by the training time already used, so the time box
+    # and the learning-rate schedule carry on where the earlier run stopped.
+    t0, seen, skipped = time.time() - used, 0, 0
+    t_seen = time.time()
+    last_save = time.time()
     model.train()
 
     def checkpoint(step, val=None):
         ck = {"model": model.state_dict(), "config": model.config, "step": step, "heldout": val, "args": vars(a)}
         torch.save(ck, os.path.join(a.out, "last.pt"))
+        # Everything needed to continue on another machine; written whole
+        # then renamed, so a copy taken mid-save is never half a file.
+        tmp = os.path.join(state_dir, "resume.pt.tmp")
+        torch.save({**ck, "optimizer": opt.state_dict(), "used": time.time() - t0, "best": best, "batch": a.batch}, tmp)
+        os.replace(tmp, os.path.join(state_dir, "resume.pt"))
         return ck
 
     for step in range(start_step + 1, a.steps + 1):
@@ -147,16 +230,31 @@ def main():
         for g in opt.param_groups:
             g["lr"] = lr
         mels, inp, tgt, mask = (t.to(dev, non_blocking=True) for t in next(stream))
-        with torch.autocast(dev.type, dtype=torch.bfloat16, enabled=dev.type == "cuda"):
-            logits = model(mels, inp)
-        loss = F.cross_entropy(logits.float()[mask], tgt[mask])
-        opt.zero_grad(set_to_none=True)
-        loss.backward()
+        try:
+            with torch.autocast(dev.type, dtype=torch.bfloat16, enabled=dev.type == "cuda"):
+                logits = model(mels, inp)
+            loss = F.cross_entropy(logits.float()[mask], tgt[mask])
+            opt.zero_grad(set_to_none=True)
+            loss.backward()
+            out_of_memory = False
+        except torch.OutOfMemoryError:
+            out_of_memory = True
+        if out_of_memory:
+            # fit_batch() should prevent this; if the card's memory is
+            # fragmented, skip the batch rather than end a long run.
+            logits = loss = None
+            opt.zero_grad(set_to_none=True)
+            torch.cuda.empty_cache()
+            skipped += 1
+            print(f"step {step}: batch did not fit in memory, skipped ({skipped} so far)", flush=True)
+            if skipped > 50 and skipped > step // 20:
+                raise SystemExit("too many batches do not fit in memory; use a smaller --batch")
+            continue
         torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
         opt.step()
         seen += mels.shape[0]
         if step % 50 == 0:
-            rate = seen / (time.time() - t0)
+            rate = seen / (time.time() - t_seen)
             print(f"step {step} loss {float(loss):.4f} lr {lr:.2e} {rate:.1f} windows/s", flush=True)
         out_of_time = a.max_minutes and progress >= 1.0
         if a.save_minutes and time.time() - last_save > a.save_minutes * 60:
@@ -168,10 +266,12 @@ def main():
             log.write(json.dumps(row) + "\n")
             log.flush()
             print(f"== step {step}: held-out loss {val:.4f}, note speed right {njs_acc:.0%}", flush=True)
+            improved = val < best
+            if improved:
+                best = val
             ck = checkpoint(step, val)
             last_save = time.time()
-            if val < best:
-                best = val
+            if improved:
                 torch.save(ck, os.path.join(a.out, "best.pt"))
         if out_of_time:
             print(f"stopped at the {a.max_minutes} minute limit, step {step}", flush=True)
