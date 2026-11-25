@@ -856,7 +856,7 @@ function vpSetup() {
   fill($("vp-left"), sides, VP.lside); fill($("vp-method"), rights, VP.method);
   const loadKey = `${key}|${diff}|${VP.lside}|${VP.method}`;
   if (VP.loaded === loadKey) return;
-  if (VP.key !== key) VP.t = 0;
+  if (VP.key && VP.key !== key) VP.t = 0;
   VP.key = key; VP.diff = diff; VP.loaded = loadKey;
   VP.left = motion(vpNotes(VP.lside)); VP.right = motion(vpNotes(VP.method));
   VP.limit = Math.max(3, quantile(VP.left.trans[0].concat(VP.left.trans[1]).map(x => x.speed), 0.99) * 1.1);
