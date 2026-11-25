@@ -21,7 +21,8 @@
   <p>A map played in 3D: blocks fly down the lane at the map's note speed, and the figure swings what the map asks for. Open your own map below, or play the demo.</p>
   <canvas id="view"></canvas>
   <div class="row">
-    <label>Camera <select id="cam"><option value="behind">Behind</option><option value="eyes0">Player's eyes</option><option value="side">Side</option><option value="orbit">Orbit (drag)</option></select></label>
+    <span>View <button data-cam="behind">Behind</button> <button data-cam="eyes0">Player's eyes</button> <button data-cam="side">Side</button> <button data-cam="top">Top</button> <button data-cam="wide">Wide</button></span>
+    <span style="color:#898781">Drag to orbit, right-drag to pan, scroll to zoom.</span>
     <label>Sound delay <input id="delay" type="number" value="0" step="10" style="width:70px"> ms</label>
     <label>Your map: difficulty file <input id="chart" type="file" accept=".dat,.json"></label>
     <label>BPM <input id="bpm" type="number" value="120" style="width:70px"></label>
@@ -37,9 +38,8 @@ const $ = (id) => document.getElementById(id);
 const viewer = createMapViewer($('view'), { three: THREE });
 const audio = $('audio');
 viewer.follow(audio);
-$('cam').onchange = (e) => viewer.camera(e.target.value);
+document.querySelectorAll('[data-cam]').forEach((b) => { b.onclick = () => viewer.camera(b.dataset.cam); });
 $('delay').onchange = (e) => { viewer.soundDelay = (+e.target.value || 0) / 1000; };
-addEventListener('resize', () => viewer.render());
 // The demo: a generated map of a CC BY track.
 try {
   const demo = await (await fetch('demo/map.json')).json();

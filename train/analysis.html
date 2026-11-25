@@ -90,6 +90,8 @@ table.data th { color: var(--text-secondary); font-weight: 600; position: sticky
 .pending { color: var(--text-muted); font-style: italic; }
 .strip-controls { display: flex; gap: 8px; align-items: center; margin: 6px 0; }
 .strip-controls input[type=range] { flex: 1; }
+.vp-cams button { font-size: 12px; padding: 3px 8px; margin-left: 2px; }
+.vp-cams button.on { border-color: var(--accent); color: var(--text-primary); }
 .vp-row { display: flex; gap: 16px; flex-wrap: wrap; }
 .vp-side { flex: 1 1 420px; min-width: 0; }
 .vp-side canvas { width: 100%; background: var(--surface-2); border-radius: 8px; display: block; }
@@ -168,7 +170,7 @@ table.data th { color: var(--text-secondary); font-weight: 600; position: sticky
         <input type="range" id="vp-time" min="0" max="100" step="0.01" value="0" aria-label="Time">
         <span id="vp-clock" style="min-width:92px;color:var(--text-secondary);font-size:13px"></span>
         <label style="color:var(--text-secondary);font-size:13px" id="vp-view-l">View <select id="vp-view"><option value="2d">2D</option><option value="3d">3D</option></select></label>
-        <label style="color:var(--text-secondary);font-size:13px" id="vp-cam-l" hidden>Camera <select id="vp-cam"><option value="behind">Behind both</option><option value="ref">Reference player's eyes</option><option value="model">Model player's eyes</option><option value="side">Side</option><option value="orbit">Orbit (drag)</option></select></label>
+        <span id="vp-cam-l" class="vp-cams" hidden><span style="color:var(--text-secondary);font-size:13px">View</span> <button data-cam="behind">Behind</button><button data-cam="ref">Left player's eyes</button><button data-cam="model">Right player's eyes</button><button data-cam="side">Side</button><button data-cam="top">Top</button><button data-cam="wide">Wide</button></span>
         <button id="vp-flag" title="Flag this moment (F)">⚑ Flag this moment</button>
       </div>
       <div id="vp-marks" class="vp-marks" aria-label="Flags on this song"></div>
@@ -1076,21 +1078,48 @@ async function v3Init() {
   const r = new T.WebGLRenderer({canvas, antialias: true}); r.setPixelRatio(Math.min(2, window.devicePixelRatio || 1));
   const scene = new T.Scene(); scene.background = new T.Color("#060a12"); scene.fog = new T.Fog("#060a12", 10, 75);
   const cam = new T.PerspectiveCamera(62, 2, 0.05, 200);
-  const orbit = new T.OrbitControls(cam, canvas); orbit.target.set(0, 1.2, -3); orbit.enabled = false;
+  // The camera is always free: drag to orbit, right-drag to pan, wheel to
+  // zoom. The view buttons glide it to a preset from wherever it is.
+  const orbit = new T.OrbitControls(cam, canvas); orbit.target.set(0, 1.2, -3); orbit.enableDamping = true; orbit.dampingFactor = 0.08;
+  orbit.addEventListener("start", () => { document.querySelectorAll(".vp-cams button").forEach(b => b.classList.remove("on")); });
   V3.r = r; V3.scene = scene; V3.cam3 = cam; V3.orbit = orbit; V3.lanes = [v3Lane(T, scene, 0), v3Lane(T, scene, 1)];
-  v3Camera(V3.cam);
+  v3Camera(V3.cam, true);
 }
-function v3Camera(which) {
-  V3.cam = which; const c = V3.cam3; if (!c) return;
-  V3.orbit.enabled = which === "orbit";
-  // Looking through a figure's eyes: hide that figure's own head.
-  V3.lanes.forEach((lane, i) => { lane.figure.head.visible = !((which === "ref" && i === 0) || (which === "model" && i === 1)); });
-  const set = (p, l) => { c.position.set(...p); c.lookAt(...l); V3.orbit.target.set(...l); };
-  if (which === "behind") set([0, 2.5, 4.8], [0, 1.25, -6]);
-  else if (which === "ref") set([LANE_X[0], 1.68, BODY_Z + 0.1], [LANE_X[0], 1.3, -10]);
-  else if (which === "model") set([LANE_X[1], 1.68, BODY_Z + 0.1], [LANE_X[1], 1.3, -10]);
-  else if (which === "side") set([7.5, 2.2, -1.5], [0, 1.2, -3]);
-  else if (which === "orbit") { V3.orbit.update(); }
+const V3_VIEWS = {
+  behind: [[0, 2.5, 4.8], [0, 1.25, -6]],
+  ref: [[LANE_X[0], 1.68, BODY_Z + 0.1], [LANE_X[0], 1.3, -10]],
+  model: [[LANE_X[1], 1.68, BODY_Z + 0.1], [LANE_X[1], 1.3, -10]],
+  side: [[7.5, 2.2, -1.5], [0, 1.2, -3]],
+  top: [[0, 10.5, -1.5], [0, 0.6, -5.5]],
+  wide: [[-7, 4.5, 9], [0, 1.2, -9]],
+};
+function v3Camera(which, instant = false) {
+  V3.cam = which; const c = V3.cam3; if (!c || !V3_VIEWS[which]) return;
+  document.querySelectorAll(".vp-cams button").forEach(b => b.classList.toggle("on", b.dataset.cam === which));
+  const [p, l] = V3_VIEWS[which], T = V3.T;
+  if (instant) { c.position.set(...p); V3.orbit.target.set(...l); V3.tween = null; return; }
+  V3.tween = {p0: c.position.clone(), l0: V3.orbit.target.clone(), p1: new T.Vector3(...p), l1: new T.Vector3(...l), t0: performance.now(), dur: 700};
+  v3Loop();
+}
+function v3CameraStep() {
+  const tw = V3.tween;
+  if (tw) {
+    const k = Math.min(1, (performance.now() - tw.t0) / tw.dur), e = k < 0.5 ? 4 * k * k * k : 1 - Math.pow(-2 * k + 2, 3) / 2;
+    V3.cam3.position.lerpVectors(tw.p0, tw.p1, e); V3.orbit.target.lerpVectors(tw.l0, tw.l1, e);
+    if (k >= 1) V3.tween = null;
+  }
+  V3.orbit.update();
+  // Wherever the camera flies, a head it is inside of is hidden.
+  const at = new V3.T.Vector3();
+  V3.lanes.forEach(lane => { lane.figure.head.visible = true; lane.figure.head.getWorldPosition(at); lane.figure.head.visible = V3.cam3.position.distanceTo(at) > 0.4; });
+}
+// While the 3D view is open, keep drawing so dragging, gliding and damping
+// stay smooth when the song is paused (playing draws every frame anyway).
+function v3Loop() {
+  if (V3.looping) return;
+  V3.looping = true;
+  const frame = () => { if (!V3.on) { V3.looping = false; return; } if (!VP.playing) v3Render(VP.t); requestAnimationFrame(frame); };
+  requestAnimationFrame(frame);
 }
 function v3Data() {
   // the maps on each lane, their note speed and swing motion
@@ -1125,17 +1154,17 @@ function v3Render(t) {
     lane.rings.forEach((ring, q) => { ring.material.opacity = 0.18 + 0.5 * Math.exp(-since * 5) * Math.exp(-q * 0.12); ring.rotation.z = t * 0.15 * (q % 2 ? 1 : -1); });
     v3PoseFigure(T, lane.figure, m, t);
   });
-  if (V3.cam === "orbit") V3.orbit.update();
+  v3CameraStep();
   V3.r.render(V3.scene, V3.cam3);
 }
 async function v3Toggle(on) {
   // The 2D view stays underneath: together they show the motion and the flagged moments.
   V3.on = on; $("vp-3d-wrap").hidden = !on; $("vp-cam-l").hidden = !on;
   if (on && !V3.r) {
-    try { await v3Init(); $("vp-3d-note").textContent = "Drag in Orbit to look around. Blocks fly at each map's note speed; the figures swing what each map asks for."; }
+    try { await v3Init(); $("vp-3d-note").textContent = "Drag to orbit, right-drag to pan, scroll to zoom; the view buttons glide back to a preset. Blocks fly at each map's note speed; the figures swing what each map asks for."; }
     catch (e) { $("vp-3d-note").textContent = "The 3D view could not start: " + e.message; return; }
   }
-  if (on) { v3Data(); v3Render(VP.t); }
+  if (on) { v3Data(); v3Render(VP.t); v3Loop(); }
 }
 
 // ---------- flags: marking a moment in a map as wrong ----------
@@ -1192,7 +1221,7 @@ function flagOpen() {
 function vpWire() {
   if (!THREE_SRC) $("vp-view-l").hidden = true;
   $("vp-view").onchange = e => v3Toggle(e.target.value === "3d");
-  $("vp-cam").onchange = e => { v3Camera(e.target.value); v3Render(VP.t); };
+  document.querySelectorAll(".vp-cams button").forEach(b => { b.onclick = () => v3Camera(b.dataset.cam); });
   if (DATA.public) {
     for (const id of ["vp-flag", "vp-flags", "vp-marks"]) $(id).hidden = true;
   }
@@ -1231,7 +1260,7 @@ function vpWire() {
   if (h.get("diff")) state.diff = h.get("diff");
   if (h.get("method")) VP.method = h.get("method");
   if (h.get("t")) VP.t = +h.get("t");
-  if (h.get("view") === "3d") setTimeout(() => { $("vp-view").value = "3d"; v3Toggle(true).then(() => { if (h.get("cam")) { $("vp-cam").value = h.get("cam"); v3Camera(h.get("cam")); } v3Render(VP.t); }); }, 100);
+  if (h.get("view") === "3d") setTimeout(() => { $("vp-view").value = "3d"; v3Toggle(true).then(() => { if (h.get("cam")) { v3Camera(h.get("cam"), true); } v3Render(VP.t); }); }, 100);
   if (h.get("focus")) setTimeout(() => { const f = document.getElementById(h.get("focus")); if (f) f.scrollIntoView(); }, 50);
 }
 

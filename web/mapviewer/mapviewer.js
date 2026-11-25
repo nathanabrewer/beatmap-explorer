@@ -9,6 +9,7 @@
 //   const viewer = createMapViewer(canvas, { three: THREE });
 //   viewer.load([{ notes, njs: 16, name: 'My map' }]);  // one or two lanes
 //   viewer.follow(audioElement);                          // the clock follows the audio
+//   viewer.camera('eyes0');                               // glide to a view; drag, pan and zoom freely
 //
 // Notes are [time in seconds, hand (0 left, 1 right), lane x (0-3), layer y
 // (0-2), cut direction (0 up, 1 down, 2 left, 3 right, 4 up-left, 5 up-right,
@@ -102,11 +103,14 @@ export function createMapViewer(canvas, { three: T, look = {}, laneGap = 3.4 } =
   scene.background = new T.Color(L.background);
   scene.fog = new T.Fog(L.background, 10, 75);
   const camera = new T.PerspectiveCamera(62, 2, 0.05, 200);
+  // The camera is always free (drag to orbit, right-drag to pan, wheel to
+  // zoom); camera(name) glides it to a preset view from wherever it is.
   const orbit = T.OrbitControls ? new T.OrbitControls(camera, canvas) : null;
-  if (orbit) orbit.enabled = false;
+  if (orbit) { orbit.enableDamping = true; orbit.dampingFactor = 0.08; }
   scene.add(new T.HemisphereLight('#8899ff', '#080810', 0.9));
   const handColors = L.hands.map((c) => new T.Color(c));
-  let lanes = [], cameraName = 'behind', time = 0, followed = null, delay = 0, raf = 0, last = 0, playing = false;
+  let lanes = [], cameraName = 'behind', time = 0, followed = null, delay = 0, last = 0, playing = false, speed = 1, tween = null, alive = true;
+  const target = new T.Vector3(0, 1.25, -6);
 
   const v = (x, y, z) => new T.Vector3(x, y, z);
   function limb(mesh, a, b) {
@@ -196,17 +200,34 @@ export function createMapViewer(canvas, { three: T, look = {}, laneGap = 3.4 } =
       renderer.setSize(w, h, false); camera.aspect = w / Math.max(h, 1); camera.updateProjectionMatrix();
     }
   }
-  function placeCamera() {
+  /** The preset views: [camera position, point looked at]. */
+  function view(name) {
     const xs = lanes.map((l) => l.root.position.x), mid = xs.length ? (Math.min(...xs) + Math.max(...xs)) / 2 : 0;
-    const set = (p, l) => { camera.position.set(...p); camera.lookAt(...l); if (orbit) orbit.target.set(...l); };
-    if (orbit) orbit.enabled = cameraName === 'orbit';
-    // Looking through a figure's eyes: hide that figure's own head.
-    const eyes = cameraName.startsWith('eyes') ? Math.min(+(cameraName.slice(4) || 0), lanes.length - 1) : -1;
-    lanes.forEach((l, i) => { l.figure.head.visible = i !== eyes; });
-    if (cameraName === 'behind') set([mid, 2.5, lanes.length > 1 ? 4.8 : 3.6], [mid, 1.25, -6]);
-    else if (cameraName.startsWith('eyes')) { const x = xs[Math.min(+(cameraName.slice(4) || 0), xs.length - 1)] || 0; set([x, 1.68, BODY_Z + 0.1], [x, 1.3, -10]); }
-    else if (cameraName === 'side') set([mid + 7.5, 2.2, -1.5], [mid, 1.2, -3]);
-    else if (cameraName === 'orbit' && orbit) orbit.update();
+    if (name.startsWith('eyes')) { const x = xs[Math.min(+(name.slice(4) || 0), Math.max(xs.length - 1, 0))] || 0; return [[x, 1.68, BODY_Z + 0.1], [x, 1.3, -10]]; }
+    return {
+      behind: [[mid, 2.5, lanes.length > 1 ? 4.8 : 3.6], [mid, 1.25, -6]],
+      side: [[mid + 7.5, 2.2, -1.5], [mid, 1.2, -3]],
+      top: [[mid, 10.5, -1.5], [mid, 0.6, -5.5]],
+      wide: [[mid - 7, 4.5, 9], [mid, 1.2, -9]],
+    }[name] || null;
+  }
+  function placeCamera(instant) {
+    const v0 = view(cameraName); if (!v0) return;
+    const [p, l] = v0, aim = orbit ? orbit.target : target;
+    if (instant) { camera.position.set(...p); aim.set(...l); camera.lookAt(aim); tween = null; return; }
+    tween = { p0: camera.position.clone(), l0: aim.clone(), p1: v(...p), l1: v(...l), t0: performance.now(), dur: 700 };
+  }
+  function stepCamera() {
+    const aim = orbit ? orbit.target : target;
+    if (tween) {
+      const k = Math.min(1, (performance.now() - tween.t0) / tween.dur), e = k < 0.5 ? 4 * k * k * k : 1 - Math.pow(-2 * k + 2, 3) / 2;
+      camera.position.lerpVectors(tween.p0, tween.p1, e); aim.lerpVectors(tween.l0, tween.l1, e);
+      if (k >= 1) tween = null;
+    }
+    if (orbit) orbit.update(); else camera.lookAt(aim);
+    // Wherever the camera is, a head it is inside of is hidden.
+    const at = new T.Vector3();
+    for (const l of lanes) { l.figure.head.visible = true; l.figure.head.getWorldPosition(at); l.figure.head.visible = camera.position.distanceTo(at) > 0.4; }
   }
 
   const api = {
@@ -220,29 +241,22 @@ export function createMapViewer(canvas, { three: T, look = {}, laneGap = 3.4 } =
         if (m.name) { l.label = label(`${m.name} · note speed ${l.njs}`); l.label.position.set(0, 2.75, -0.6); l.root.add(l.label); }
         return l;
       });
-      placeCamera(); api.render();
+      placeCamera(!api._placed); api._placed = true;
     },
-    /** 'behind', 'eyes0', 'eyes1', 'side' or 'orbit' (drag to look around). */
-    camera(name) { cameraName = name; placeCamera(); api.render(); },
-    seek(t) { time = Math.max(0, t); api.render(); },
+    /** Glide to a view: 'behind', 'eyes0', 'eyes1', 'side', 'top' or 'wide'. The mouse moves it freely at any time. */
+    camera(name, instant = false) { cameraName = name; placeCamera(instant); },
+    seek(t) { time = Math.max(0, t); },
     get time() { return time; },
     /** Seconds the sound reaches the listener after the audio element reports it (Bluetooth: more). */
     set soundDelay(s) { delay = s; },
-    /** Follow an audio element's clock while it plays (or null to stop following). */
-    follow(audio) {
-      followed = audio; cancelAnimationFrame(raf);
-      const tick = () => { if (followed) { time = Math.max(0, followed.currentTime - delay); api.render(); raf = requestAnimationFrame(tick); } };
-      if (audio) raf = requestAnimationFrame(tick);
-    },
+    /** Follow an audio element's clock (or null to stop following). */
+    follow(audio) { followed = audio; },
     /** Play without audio, at a speed (1 = real time). */
-    play(speed = 1) {
-      playing = true; last = performance.now(); cancelAnimationFrame(raf);
-      const tick = (now) => { if (!playing) return; time += (now - last) / 1000 * speed; last = now; api.render(); raf = requestAnimationFrame(tick); };
-      raf = requestAnimationFrame(tick);
-    },
-    pause() { playing = false; cancelAnimationFrame(raf); },
+    play(s = 1) { playing = true; speed = s; last = performance.now(); },
+    pause() { playing = false; },
     render() {
       resize();
+      stepCamera();
       for (const l of lanes) {
         let lo = 0, hi = l.times.length; while (lo < hi) { const mid = (lo + hi) >> 1; if (l.times[mid] < time - 0.15) lo = mid + 1; else hi = mid; }
         let k = 0;
@@ -260,10 +274,20 @@ export function createMapViewer(canvas, { three: T, look = {}, laneGap = 3.4 } =
         l.rings.forEach((r, q) => { r.material.opacity = 0.18 + 0.5 * Math.exp(-since * 5) * Math.exp(-q * 0.12); r.rotation.z = time * 0.15 * (q % 2 ? 1 : -1); });
         pose(l.figure, l.sw, time);
       }
-      if (cameraName === 'orbit' && orbit) orbit.update();
       renderer.render(scene, camera);
     },
-    destroy() { api.pause(); api.follow(null); renderer.dispose(); },
+    destroy() { alive = false; renderer.dispose(); if (orbit) orbit.dispose(); },
   };
+  // One drawing loop: the clock (audio or free-running), the camera, the scene.
+  const frame = (now) => {
+    if (!alive) return;
+    if (followed && !followed.paused) time = Math.max(0, followed.currentTime - delay);
+    else if (followed) time = Math.max(0, followed.currentTime);
+    else if (playing) time += (now - last) / 1000 * speed;
+    last = now;
+    api.render();
+    requestAnimationFrame(frame);
+  };
+  requestAnimationFrame(frame);
   return api;
 }

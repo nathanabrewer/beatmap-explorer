@@ -13,7 +13,7 @@ const viewer = createMapViewer(canvas, { three: THREE, look: { hands: ['#ff3d9a'
 viewer.load([{ notes: notesFromChart(difficultyJson, bpm), njs: 16, name: 'Expert+' }]);
 viewer.follow(audioElement);      // the picture follows the audio's clock
 viewer.soundDelay = 0.12;         // seconds the sound reaches the listener late (Bluetooth)
-viewer.camera('eyes0');           // 'behind', 'eyes0', 'eyes1', 'side', 'orbit'
+viewer.camera('eyes0');           // glide to 'behind', 'eyes0', 'eyes1', 'side', 'top', 'wide'
 ```
 
 - **Notes:** `[seconds, hand (0 left, 1 right), lane x 0-3, layer y 0-2, cut direction 0-8]`.
@@ -23,6 +23,9 @@ viewer.camera('eyes0');           // 'behind', 'eyes0', 'eyes1', 'side', 'orbit'
   its arrow's direction. Between cuts the saber tip curves from one cut into the
   next. The arms reach the grips by two-bone inverse kinematics. A smooth
   pendulum means the map flows; a snap means it asks the hand to jump.
+- **Camera:** always free: drag to orbit, right-drag to pan, scroll to zoom.
+  `camera(name)` glides to a preset from wherever it is; a head the camera is
+  inside of is hidden.
 - **Look:** `look` overrides the colours: hands, suit, floor, lines, frame, background.
 - **Not yet:** walls, bombs, arcs and chains, and cut effects.
 
