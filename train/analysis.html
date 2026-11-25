@@ -159,7 +159,9 @@ table.data th { color: var(--text-secondary); font-weight: 600; position: sticky
       <div class="strip-controls">
         <button id="vp-play">Play</button>
         <label style="color:var(--text-secondary);font-size:13px">Speed <select id="vp-speed"><option value="0.25">¼×</option><option value="0.5">½×</option><option value="1" selected>1×</option></select></label>
-        <label style="color:var(--text-secondary);font-size:13px">Right side <select id="vp-method"></select></label>
+        <label style="color:var(--text-secondary);font-size:13px">Song <select id="vp-song" style="max-width:220px"></select></label>
+        <label style="color:var(--text-secondary);font-size:13px">Left <select id="vp-left"></select></label>
+        <label style="color:var(--text-secondary);font-size:13px">Right <select id="vp-method"></select></label>
         <label style="color:var(--text-secondary);font-size:13px"><input type="checkbox" id="vp-sound" checked> Sound</label>
         <label class="vp-sync" style="color:var(--text-secondary);font-size:13px" title="How late the sound reaches you. Measured from the output automatically; add more for Bluetooth headphones until the ticks land on the beat.">Sound delay <input type="number" id="vp-delay" value="0" step="10" style="width:64px"> ms <span id="vp-auto"></span></label>
         <label class="vp-sync" style="color:var(--text-secondary);font-size:13px" title="A click on every note of the reference map, through the same speakers: if the clicks land on the music, the timing is right."><input type="checkbox" id="vp-ticks"> Ticks</label>
@@ -173,7 +175,7 @@ table.data th { color: var(--text-secondary); font-weight: 600; position: sticky
       <form id="vp-form" class="vp-form" hidden>
         <div class="row"><b id="vp-form-time"></b>
           <label><input type="radio" name="vp-map" value="right" checked> <span id="vp-form-right"></span></label>
-          <label><input type="radio" name="vp-map" value="real"> Reference map</label></div>
+          <label><input type="radio" name="vp-map" value="real"> <span id="vp-form-left">Reference map</span></label></div>
         <div class="row" id="vp-tags"></div>
         <div class="row"><input id="vp-note-text" type="text" placeholder="What's wrong here? (optional)" style="flex:1"><button type="submit">Save flag</button><button type="button" id="vp-cancel">Cancel</button></div>
       </form>
@@ -615,7 +617,7 @@ function renderSnapping() {
   b2.append(s);
 }
 
-function selectDetail(key) { state.detailSong = key; renderDetail(); renderHeat(); document.getElementById("detail").scrollIntoView({behavior: "smooth"}); }
+function selectDetail(key) { VP.pick = null; state.detailSong = key; renderDetail(); renderHeat(); document.getElementById("detail").scrollIntoView({behavior: "smooth"}); }
 
 function renderDetail() {
   const key = state.detailSong || (state.song !== "all" ? state.song : [...DATA.songs].sort((a, b) => a.title.localeCompare(b.title))[0].key);
@@ -726,9 +728,10 @@ function renderMakers() {
 }
 
 function renderNotes() {
-  if (DATA.credits && DATA.credits.length) {
+  const credits = (DATA.credits || []).concat(((DATA.showcase || {}).songs || []).map(s => s.credit).filter(Boolean));
+  if (credits.length) {
     $("credits").hidden = false;
-    const cl = $("credits-list"); cl.replaceChildren(...DATA.credits.map(c => el("li", {}, c)));
+    const cl = $("credits-list"); cl.replaceChildren(...credits.map(c => el("li", {}, c)));
   }
   const ul = $("notes-list"); ul.replaceChildren();
   for (const m of METRICS) ul.append(el("li", {}, `${m.name}: ${m.about}.`));
@@ -818,39 +821,64 @@ function events(m, limit) {
   for (const t of m.crossed) out.push({t, kind: "arms crossed"});
   return out.sort((a, b) => a.t - b.t);
 }
-function vpNotes(side) {
-  const diff = state.diff === "all" ? "ExpertPlus" : state.diff;
-  if (side === "real") { const r = DATA.real[`${VP.key}|${diff}`]; return r ? r.notes : []; }
-  const row = DATA.rows.find(r => r.m === side && r.s === VP.key && r.d === diff); return row ? row.notes : [];
+// Songs the player can show: the scored songs, and showcase songs that have
+// music but no reference map (either side then picks a map maker).
+function songOf(key) { return songsByKey[key] || ((DATA.showcase || {}).songs || []).find(s => s.key === key); }
+function isShow(key) { return !songsByKey[key] && !!songOf(key); }
+function vpDiff() { return state.diff === "all" ? "ExpertPlus" : state.diff; }
+function vpMap(side, key = VP.key, diff = vpDiff()) {
+  if (side === "real") { const r = DATA.real[`${key}|${diff}`]; return r ? {notes: r.notes, njs: r.njs} : null; }
+  if (isShow(key)) { const m = DATA.showcase.maps[`${key}|${diff}|${side}`]; return m || null; }
+  const row = DATA.rows.find(r => r.m === side && r.s === key && r.d === diff); return row ? {notes: row.notes, njs: row.njs} : null;
+}
+function vpNotes(side) { const m = vpMap(side); return m ? m.notes : []; }
+function sideName(side, song) { return side === "real" ? refName(song) : mapName(side); }
+function vpSides(key, diff) {
+  const ids = isShow(key) ? DATA.showcase.methods : DATA.methods.map(m => m.id);
+  return (isShow(key) ? [] : ["real"]).concat(ids.filter(id => vpMap(id, key, diff)));
 }
 function vpSetup() {
-  const key = state.detailSong || DATA.songs[0].key, diff = state.diff === "all" ? "ExpertPlus" : state.diff;
-  const sel = $("vp-method");
-  const options = DATA.methods.filter(m => DATA.rows.some(r => r.m === m.id && r.s === key && r.d === diff));
-  if (!VP.method || !options.some(m => m.id === VP.method)) VP.method = (options.find(m => m.id === "large") || options[0] || {}).id;
-  sel.replaceChildren(...options.map(m => { const o = el("option", {value: m.id}, m.name); if (m.id === VP.method) o.selected = true; return o; }));
-  if (VP.key === key && VP.diff === diff && VP.loaded === VP.method) return;
-  VP.key = key; VP.diff = diff; VP.loaded = VP.method;
-  VP.left = motion(vpNotes("real")); VP.right = motion(vpNotes(VP.method));
+  const key = VP.pick || state.detailSong || DATA.songs[0].key, diff = vpDiff(), song = songOf(key);
+  const pick = $("vp-song");
+  if (!pick.options.length) {
+    const g1 = el("optgroup", {label: "Scored songs"}); [...DATA.songs].sort((a, b) => a.title.localeCompare(b.title)).forEach(s => g1.append(el("option", {value: s.key}, s.title)));
+    pick.append(g1);
+    if (DATA.showcase && DATA.showcase.songs.length) { const g2 = el("optgroup", {label: "Listen: CC BY music"}); DATA.showcase.songs.forEach(s => g2.append(el("option", {value: s.key}, `${s.title} (${s.artist})`))); pick.append(g2); }
+  }
+  pick.value = key;
+  const sides = vpSides(key, diff);
+  if (!sides.includes(VP.lside)) VP.lside = sides.includes("real") ? "real" : (sides.find(x => x === "large") || sides[0]);
+  const rights = sides.filter(x => x !== VP.lside);
+  if (!rights.includes(VP.method)) VP.method = rights.find(x => x === (isShow(key) ? "inferno" : "large")) || rights[0];
+  const fill = (sel, list, cur) => sel.replaceChildren(...list.map(x => { const o = el("option", {value: x}, x === "real" ? "Reference map" : mapName(x)); if (x === cur) o.selected = true; return o; }));
+  fill($("vp-left"), sides, VP.lside); fill($("vp-method"), rights, VP.method);
+  const loadKey = `${key}|${diff}|${VP.lside}|${VP.method}`;
+  if (VP.loaded === loadKey) return;
+  if (VP.key !== key) VP.t = 0;
+  VP.key = key; VP.diff = diff; VP.loaded = loadKey;
+  VP.left = motion(vpNotes(VP.lside)); VP.right = motion(vpNotes(VP.method));
   VP.limit = Math.max(3, quantile(VP.left.trans[0].concat(VP.left.trans[1]).map(x => x.speed), 0.99) * 1.1);
   VP.evL = events(VP.left, VP.limit); VP.evR = events(VP.right, VP.limit);
-  const song = songsByKey[key], dur = Math.max(VP.left.end, VP.right.end, song.seconds);
+  const dur = Math.max(VP.left.end, VP.right.end, song.seconds);
   $("vp-time").max = dur;
   if (VP.t > dur) VP.t = 0;
   if (!VP.t) VP.t = Math.max(0, (VP.left.sw[0][0] || VP.left.sw[1][0] || {t: 1}).t - 1);
-  $("vp-l-name").textContent = `${refName(song)} · ${song.title} · ${DIFF_NAMES[diff]}`;
-  $("vp-r-name").textContent = (methodsById[VP.method] || {}).name || "";
+  $("vp-l-name").textContent = `${sideName(VP.lside, song)} · ${song.title} · ${DIFF_NAMES[diff]}`;
+  $("vp-r-name").textContent = sideName(VP.method, song);
   const audio = $("vp-audio"), served = location.protocol.startsWith("http");
-  const src = song.audio ? (served ? `/audio/${song.key}` : song.audio) : "";
-  if (src && audio.dataset.src !== src) { audio.dataset.src = src; audio.src = src; }
-  $("vp-note").textContent = DATA.public ? "No audio: the songs belong to their owners and are not included." :
+  const src = !song.audio ? "" : (DATA.public ? song.audio : (served ? `/audio/${song.key}` : song.audio));
+  if (audio.dataset.src !== src) { audio.dataset.src = src; if (src) audio.src = src; else { audio.removeAttribute("src"); audio.load(); } }
+  $("vp-sound").closest("label").hidden = !src; document.querySelectorAll(".vp-sync").forEach(e => { e.hidden = !src; });
+  $("vp-sound").checked = !!src;
+  const credit = song.credit ? `Music: ${song.credit}. ` : "";
+  $("vp-note").textContent = credit + (DATA.public ? (src ? "" : "No audio: the songs belong to their owners and are not included.") :
     (song.audio ? "Sound: the song's file on this Mac. " : "No audio file for this song. ") +
-    (served ? "Flags are saved to flags.jsonl beside the report." : "Flags are kept in this browser (open the report through report_server.py to save them to a file).");
+    (served ? "Flags are saved to flags.jsonl beside the report." : "Flags are kept in this browser (open the report through report_server.py to save them to a file)."));
   renderFlags();
   for (const [id, ev] of [["vp-l-ev", VP.evL], ["vp-r-ev", VP.evR]]) {
     const box = $(id); box.replaceChildren();
     const snaps = ev.filter(e => e.kind === "snap").length, coll = ev.length - snaps;
-    box.append(el("div", {}, `${snaps} snap${snaps === 1 ? "" : "s"} (a hand repositioning faster than 99% of this song's reference map asks), ${coll} time${coll === 1 ? "" : "s"} arms crossed`));
+    box.append(el("div", {}, `${snaps} snap${snaps === 1 ? "" : "s"} (a hand repositioning faster than 99% of the left map asks), ${coll} time${coll === 1 ? "" : "s"} arms crossed`));
     for (const e of ev.slice(0, 40)) { const b = el("button", {}, `${clock(e.t)} ${e.kind}`); b.onclick = () => vpSeek(e.t - 1.2); box.append(b); }
   }
   vpDraw();
@@ -907,7 +935,7 @@ function vpRender(id, m, notes, evs) {
 function vpDraw() {
   if (!VP.left) return;
   if (V3.on) v3Render(VP.t);
-  vpRender("vp-l", VP.left, vpNotes("real"), VP.evL);
+  vpRender("vp-l", VP.left, vpNotes(VP.lside), VP.evL);
   vpRender("vp-r", VP.right, vpNotes(VP.method), VP.evR);
   $("vp-time").value = VP.t; $("vp-clock").textContent = `${clock(VP.t)} · ${VP.t.toFixed(2)} s`;
 }
@@ -918,7 +946,7 @@ function soundDelay() { return (VP.latency || 0) + (+$("vp-delay").value || 0) /
 function vpTicks(mediaNow) {
   if (!$("vp-ticks").checked || !VP.ctx) return;
   const ahead = 0.25, until = mediaNow + ahead, from = Math.max(VP.tickedTo || -1, mediaNow);
-  for (const n of vpNotes("real")) {
+  for (const n of vpNotes(VP.lside)) {
     const t = n[0] / 100;
     if (t <= from || t > until) continue;
     const at = VP.ctx.currentTime + (t - mediaNow) / (+$("vp-speed").value || 1);
@@ -1055,6 +1083,8 @@ async function v3Init() {
 function v3Camera(which) {
   V3.cam = which; const c = V3.cam3; if (!c) return;
   V3.orbit.enabled = which === "orbit";
+  // Looking through a figure's eyes: hide that figure's own head.
+  V3.lanes.forEach((lane, i) => { lane.figure.head.visible = !((which === "ref" && i === 0) || (which === "model" && i === 1)); });
   const set = (p, l) => { c.position.set(...p); c.lookAt(...l); V3.orbit.target.set(...l); };
   if (which === "behind") set([0, 2.5, 4.8], [0, 1.25, -6]);
   else if (which === "ref") set([LANE_X[0], 1.68, BODY_Z + 0.1], [LANE_X[0], 1.3, -10]);
@@ -1064,18 +1094,17 @@ function v3Camera(which) {
 }
 function v3Data() {
   // the maps on each lane, their note speed and swing motion
-  const diff = VP.diff, real = DATA.real[`${VP.key}|${diff}`] || {}, row = DATA.rows.find(r => r.m === VP.method && r.s === VP.key && r.d === diff) || {};
-  const song = songsByKey[VP.key];
-  V3.maps = [{notes: vpNotes("real"), njs: real.njs || 16, motion: VP.left, name: refName(song)}, {notes: vpNotes(VP.method), njs: row.njs || real.njs || 16, motion: VP.right, name: mapName(VP.method)}];
+  const diff = VP.diff, song = songOf(VP.key), L = vpMap(VP.lside) || {}, R = vpMap(VP.method) || {};
+  V3.maps = [{notes: L.notes || [], njs: L.njs || 16, motion: VP.left, name: sideName(VP.lside, song)}, {notes: R.notes || [], njs: R.njs || L.njs || 16, motion: VP.right, name: sideName(VP.method, song)}];
   V3.maps.forEach((m, i) => { m.notes = [...m.notes].sort((a, b) => a[0] - b[0]); m.times = m.notes.map(n => n[0] / 100); });
   if (V3.T) V3.lanes.forEach((lane, i) => v3SetLabel(V3.T, lane, `${V3.maps[i].name} · note speed ${V3.maps[i].njs}`));
-  V3.dataKey = `${VP.key}|${diff}|${VP.method}`;
+  V3.dataKey = VP.loaded;
 }
 function v3Render(t) {
   if (!V3.on || !V3.r) return;
   const T = V3.T, canvas = $("vp-3d"), w = canvas.clientWidth, h = canvas.clientHeight;
   if (canvas.width !== Math.round(w * V3.r.getPixelRatio())) { V3.r.setSize(w, h, false); V3.cam3.aspect = w / h; V3.cam3.updateProjectionMatrix(); }
-  if (V3.dataKey !== `${VP.key}|${VP.diff}|${VP.method}`) v3Data();
+  if (V3.dataKey !== VP.loaded) v3Data();
   V3.maps.forEach((m, i) => {
     const lane = V3.lanes[i], ahead = 2.2;
     let lo = 0, hi = m.times.length; while (lo < hi) { const mid = (lo + hi) >> 1; if (m.times[mid] < t - 0.15) lo = mid + 1; else hi = mid; }
@@ -1155,6 +1184,7 @@ function flagOpen() {
   if (VP.playing) $("vp-play").click();
   $("vp-form-time").textContent = `At ${clock(VP.t)} (${VP.t.toFixed(2)} s)`;
   $("vp-form-right").textContent = mapName(VP.method);
+  $("vp-form-left").textContent = sideName(VP.lside, songOf(VP.key));
   const tags = $("vp-tags");
   tags.replaceChildren(...TAGS.map(t => { const l = el("label"); l.append(el("input", {type: "checkbox", value: t}), document.createTextNode(" " + t)); return l; }));
   $("vp-note-text").value = ""; $("vp-form").hidden = false; $("vp-note-text").focus();
@@ -1165,15 +1195,12 @@ function vpWire() {
   $("vp-cam").onchange = e => { v3Camera(e.target.value); v3Render(VP.t); };
   if (DATA.public) {
     for (const id of ["vp-flag", "vp-flags", "vp-marks"]) $(id).hidden = true;
-    $("vp-sound").closest("label").hidden = true;
-    $("vp-sound").checked = false;
-    document.querySelectorAll(".vp-sync").forEach(e => { e.hidden = true; });
   }
   $("vp-flag").onclick = flagOpen;
   $("vp-cancel").onclick = () => { $("vp-form").hidden = true; };
   $("vp-form").onsubmit = e => {
     e.preventDefault();
-    const side = document.querySelector('input[name="vp-map"]:checked').value, map = side === "real" ? "real" : VP.method;
+    const side = document.querySelector('input[name="vp-map"]:checked').value, map = side === "real" ? VP.lside : VP.method;
     const t = VP.t, near = vpNotes(map).filter(n => Math.abs(n[0] / 100 - t) <= 1.5);
     flagAdd({song: VP.key, difficulty: VP.diff, map, time: +t.toFixed(3), tags: [...document.querySelectorAll("#vp-tags input:checked")].map(i => i.value), note: $("vp-note-text").value.trim(), notes: near});
     $("vp-form").hidden = true;
@@ -1197,8 +1224,10 @@ function vpWire() {
   $("vp-speed").onchange = () => { $("vp-audio").playbackRate = +$("vp-speed").value; };
   $("vp-sound").onchange = () => { const a = $("vp-audio"); if (!$("vp-sound").checked) a.pause(); else if (VP.playing && a.src) { a.currentTime = VP.t; a.play().catch(() => {}); } };
   $("vp-method").onchange = e => { VP.method = e.target.value; vpSetup(); };
+  $("vp-left").onchange = e => { VP.lside = e.target.value; vpSetup(); };
+  $("vp-song").onchange = e => { VP.pick = e.target.value; VP.t = 0; vpSetup(); };
   const h = new URLSearchParams(location.hash.slice(1));
-  if (h.get("song")) state.detailSong = h.get("song");
+  if (h.get("song")) { if (isShow(h.get("song"))) VP.pick = h.get("song"); else state.detailSong = h.get("song"); }
   if (h.get("diff")) state.diff = h.get("diff");
   if (h.get("method")) VP.method = h.get("method");
   if (h.get("t")) VP.t = +h.get("t");

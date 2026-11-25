@@ -17,6 +17,12 @@ SPEC (JSON; paths may start with ~ or be relative to the project):
     runs: [{name, slot, log (train.py log.jsonl), trainLog (stdout, optional)}]
     speed: [{label, value, unit, note}]  measured generation speeds
     notes: ["...", ...]          caveats shown on the page
+    showcase                   optional: songs with music but no reference map, for
+                               the virtual player only (a "Listen" set): {tracks:
+                               a JSON list of {key, slug, title, artist, credit,
+                               licenseUrl, source} with <slug>.mp3 beside it,
+                               audioBase: the audio URL prefix on a public page,
+                               methods: [{id, maps: a map folder or zip with {key}}]}
     three                      optional: a three.js ES module bundle (exports Scene,
                                WebGLRenderer, OrbitControls, ...): embedded for the
                                virtual player's 3D view
@@ -258,6 +264,31 @@ def main():
             "runs": [read_run(r) for r in spec.get("runs", [])], "speed": spec.get("speed", []), "notes": spec.get("notes", []),
             "realAbout": spec.get("realAbout", {}), "public": bool(spec.get("public")), "credits": spec.get("credits", []), "songsLabel": spec.get("songsLabel", ""),
             "offsetBins": OFFSET_BINS, "densityBin": DENSITY_BIN, "shifts": SHIFTS}
+    audio_extra = {}
+    sc = spec.get("showcase")
+    if sc:
+        import librosa
+        tracks = json.load(open(path(sc["tracks"])))
+        show_songs, show_maps = [], {}
+        for t in tracks:
+            mp3 = os.path.join(os.path.dirname(path(sc["tracks"])), t["slug"] + ".mp3")
+            song = {k: t.get(k, "") for k in ("key", "title", "artist", "credit", "licenseUrl", "source")}
+            song["seconds"] = round(float(librosa.get_duration(path=mp3)), 3)
+            song["audio"] = sc.get("audioBase", "audio/") + t["slug"] + ".mp3" if spec.get("public") else "file://" + os.path.abspath(mp3)
+            if not spec.get("public"):
+                audio_extra[t["key"]] = os.path.abspath(mp3)
+            show_songs.append(song)
+            for m in sc["methods"]:
+                mp = path(m["maps"].replace("{key}", t["key"]))
+                if not os.path.exists(mp):
+                    continue
+                for d in S.read_any(mp)["difficulties"]:
+                    if d.get("chart") and d["characteristic"] == "Standard" and d["name"] in diffs:
+                        notes = sorted(d["chart"]["notes"], key=lambda n: n[0])
+                        show_maps[f'{t["key"]}|{d["name"]}|{m["id"]}'] = {"njs": d.get("njs"),
+                            "notes": [[int(round(n[0] * 100)), int(n[4]), int(n[2]), int(n[3]), int(n[5])] for n in notes]}
+        page["showcase"] = {"songs": show_songs, "maps": show_maps, "methods": [m["id"] for m in sc["methods"]]}
+        print(f"showcase: {len(show_songs)} songs, {len(show_maps)} maps", flush=True)
     blob = json.dumps(page, separators=(",", ":")).replace("</", "<\\/")
     three = open(path(spec["three"])).read() if spec.get("three") else ""
     html = open(os.path.join(HERE, "analysis.html")).read().replace('"__DATA__"', blob)
@@ -266,6 +297,7 @@ def main():
     open(out_path, "w").write(html)
     # For report_server.py: the song files it may serve, by song key.
     audio = {s["key"]: s["audio"][len("file://"):] for s in songs if s.get("audio")}
+    audio.update(audio_extra)
     if audio and not spec.get("public"):
         json.dump(audio, open(os.path.join(os.path.dirname(os.path.abspath(out_path)), "audio.json"), "w"), indent=1)
     print(f"wrote {out_path}: {len(songs)} songs, {len(rows)} maps, {len(html) / 1e6:.1f} MB")
