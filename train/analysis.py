@@ -17,6 +17,9 @@ SPEC (JSON; paths may start with ~ or be relative to the project):
     runs: [{name, slot, log (train.py log.jsonl), trainLog (stdout, optional)}]
     speed: [{label, value, unit, note}]  measured generation speeds
     notes: ["...", ...]          caveats shown on the page
+    three                      optional: a three.js ES module bundle (exports Scene,
+                               WebGLRenderer, OrbitControls, ...): embedded for the
+                               virtual player's 3D view
     public                     true: a page to publish. No audio paths, no audio.json,
                                no flagging (the page says so); credits from "credits"
     index                      optional: mapkit's index.json, for each song's audio
@@ -111,7 +114,7 @@ def best_shift(real, gen, seconds):
     return best
 
 
-def map_row(method, key, diff, real, gen, seconds):
+def map_row(method, key, diff, real, gen, seconds, njs=None):
     sc = E.score(real, gen, seconds)
     gen = sorted(gen)
     gt = [n[0] for n in gen]
@@ -120,7 +123,7 @@ def map_row(method, key, diff, real, gen, seconds):
     shift_f1, shift = best_shift(real, gen, seconds)
     flags = matched_flags([n[0] for n in real], gt)
     keep = ("timingF1", "timingPrecision", "timingRecall", "colourF1", "place", "cut", "density", "swingErrors")
-    return {"m": method, "s": key, "d": diff, "sc": {k: round(float(sc[k]), 4) for k in keep},
+    return {"m": method, "s": key, "d": diff, "njs": njs, "sc": {k: round(float(sc[k]), 4) for k in keep},
             "off": [int(v) for v in hist], "offMedian": round(float(np.median(off)), 1) if len(off) else None,
             "shift": shift, "shiftF1": round(shift_f1, 4), "dens": density(gt, seconds),
             "notes": [[int(round(n[0] * 100)), int(n[1]), int(n[2]), int(n[3]), int(n[4]), f] for n, f in zip(gen, flags)]}
@@ -133,7 +136,7 @@ def read_eval(p):
         if "objects" not in r:
             continue
         notes = [(o["tick"] / 100.0, o["c"], o["x"], o["y"], o["d"]) for o in r["objects"] if o["kind"] == "note"]
-        out[(r.get("key") or r["song"], r["difficulty"])] = (notes, r.get("generateSeconds"))
+        out[(r.get("key") or r["song"], r["difficulty"])] = (notes, r.get("generateSeconds"), r.get("njsPredicted"))
     return out
 
 
@@ -145,7 +148,7 @@ def read_maps(pattern, key, diffs):
     out = {}
     for d in song["difficulties"]:
         if d.get("chart") and d["characteristic"] == "Standard" and d["name"] in diffs:
-            out[(key, d["name"])] = ([(n[0], n[4], n[2], n[3], n[5]) for n in d["chart"]["notes"]], None)
+            out[(key, d["name"])] = ([(n[0], n[4], n[2], n[3], n[5]) for n in d["chart"]["notes"]], None, d.get("njs"))
     return out
 
 
@@ -185,7 +188,7 @@ def main():
     ref_dir = path(spec["reference"])
     test = D.read_test_songs(path(spec["testSongs"]))
     diffs = spec.get("difficulties", ["Expert", "ExpertPlus"])
-    songs, reals = [], {}
+    songs, reals, real_njs = [], {}, {}
     for f in sorted(glob.glob(os.path.join(ref_dir, "*.json.gz"))):
         s = json.load(gzip.open(f, "rt"))
         if D.title_key(s.get("title", "")) not in test:
@@ -196,6 +199,7 @@ def main():
             if d.get("chart") and d["characteristic"] == "Standard" and d["name"] in diffs:
                 notes = sorted((n[0], n[4], n[2], n[3], n[5]) for n in d["chart"]["notes"])
                 reals[(key, d["name"])] = notes
+                real_njs[(key, d["name"])] = d.get("njs")
     if spec.get("index") and not spec.get("public") and os.path.exists(path(spec["index"])):
         audio = {e.get("id"): e.get("audio", "") for e in json.load(open(path(spec["index"]))).get("songs", [])}
         for s in songs:
@@ -216,14 +220,14 @@ def main():
             for s in songs:
                 src.update(read_maps(m["maps"], s["key"], diffs))
         elif m.get("from") in gen_sources:
-            for (k, d), (notes, secs) in gen_sources[m["from"]].items():
-                src[(k, d)] = (snap(notes, onsets_for(os.path.join(ref_dir, k)), m.get("snapMs", 80) / 1000.0), secs)
+            for (k, d), (notes, secs, njs) in gen_sources[m["from"]].items():
+                src[(k, d)] = (snap(notes, onsets_for(os.path.join(ref_dir, k)), m.get("snapMs", 80) / 1000.0), secs, njs)
         gen_sources[m["id"]] = src
         count = 0
-        for (k, d), (notes, secs) in sorted(src.items()):
+        for (k, d), (notes, secs, njs) in sorted(src.items()):
             if (k, d) not in reals or not notes:
                 continue
-            row = map_row(m["id"], k, d, reals[(k, d)], notes, by_key[k]["seconds"])
+            row = map_row(m["id"], k, d, reals[(k, d)], notes, by_key[k]["seconds"], njs)
             row["genSeconds"] = secs
             rows.append(row)
             count += 1
@@ -234,7 +238,7 @@ def main():
     for m in spec["methods"]:
         if m.get("from") or not gen_sources.get(m["id"]):
             continue
-        for (k, d), (notes, _) in sorted(gen_sources[m["id"]].items()):
+        for (k, d), (notes, _, _) in sorted(gen_sources[m["id"]].items()):
             if (k, d) not in reals:
                 continue
             real, secs = reals[(k, d)], by_key[k]["seconds"]
@@ -247,7 +251,7 @@ def main():
             snapping.append(entry)
     real_out = {f"{k}|{d}": {"notes": [[int(round(n[0] * 100)), int(n[1]), int(n[2]), int(n[3]), int(n[4])] for n in notes],
                              "dens": density([n[0] for n in notes], by_key[k]["seconds"]),
-                             "swingErrors": round(E.swing_errors([(n[0], n[1], n[4]) for n in notes]), 2)}
+                             "swingErrors": round(E.swing_errors([(n[0], n[1], n[4]) for n in notes]), 2), "njs": real_njs.get((k, d))}
                 for (k, d), notes in reals.items()}
     page = {"title": spec.get("title", "Map makers compared"), "subtitle": spec.get("subtitle", ""), "built": spec.get("built", ""),
             "difficulties": diffs, "songs": songs, "methods": methods, "rows": rows, "real": real_out, "snapping": snapping,
@@ -255,7 +259,9 @@ def main():
             "realAbout": spec.get("realAbout", {}), "public": bool(spec.get("public")), "credits": spec.get("credits", []), "songsLabel": spec.get("songsLabel", ""),
             "offsetBins": OFFSET_BINS, "densityBin": DENSITY_BIN, "shifts": SHIFTS}
     blob = json.dumps(page, separators=(",", ":")).replace("</", "<\\/")
+    three = open(path(spec["three"])).read() if spec.get("three") else ""
     html = open(os.path.join(HERE, "analysis.html")).read().replace('"__DATA__"', blob)
+    html = html.replace('"__THREE__"', json.dumps(three).replace("</", "<\\/"))
     os.makedirs(os.path.dirname(os.path.abspath(out_path)), exist_ok=True)
     open(out_path, "w").write(html)
     # For report_server.py: the song files it may serve, by song key.
