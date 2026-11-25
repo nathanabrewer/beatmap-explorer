@@ -17,6 +17,8 @@ SPEC (JSON; paths may start with ~ or be relative to the project):
     runs: [{name, slot, log (train.py log.jsonl), trainLog (stdout, optional)}]
     speed: [{label, value, unit, note}]  measured generation speeds
     notes: ["...", ...]          caveats shown on the page
+    public                     true: a page to publish. No audio paths, no audio.json,
+                               no flagging (the page says so); credits from "credits"
     index                      optional: mapkit's index.json, for each song's audio
                                file (the virtual player plays it; the page must
                                stay on the machine that holds the files)
@@ -189,12 +191,12 @@ def main():
         if D.title_key(s.get("title", "")) not in test:
             continue
         key = os.path.basename(f)[:-len(".json.gz")]
-        songs.append({"key": key, "title": s["title"], "artist": s.get("artist", ""), "seconds": s["seconds"]})
+        songs.append({"key": key, "title": s["title"], "artist": s.get("artist", ""), "seconds": s["seconds"], "mapper": s.get("mapper", "")})
         for d in s["difficulties"]:
             if d.get("chart") and d["characteristic"] == "Standard" and d["name"] in diffs:
                 notes = sorted((n[0], n[4], n[2], n[3], n[5]) for n in d["chart"]["notes"])
                 reals[(key, d["name"])] = notes
-    if spec.get("index") and os.path.exists(path(spec["index"])):
+    if spec.get("index") and not spec.get("public") and os.path.exists(path(spec["index"])):
         audio = {e.get("id"): e.get("audio", "") for e in json.load(open(path(spec["index"]))).get("songs", [])}
         for s in songs:
             a = audio.get(s["key"][3:] if s["key"].startswith("of-") else s["key"], "")
@@ -225,7 +227,7 @@ def main():
             row["genSeconds"] = secs
             rows.append(row)
             count += 1
-        methods.append({k: m[k] for k in ("id", "name", "slot", "note", "from", "about") if k in m} | {"maps": count, "pending": count == 0})
+        methods.append({k: m[k] for k in ("id", "name", "slot", "note", "from", "about", "external", "tileNote") if k in m} | {"maps": count, "pending": count == 0})
         print(f"{m['name']}: {count} maps", flush=True)
     # Onset snapping at several windows, for each method that writes its own maps.
     snapping = []
@@ -250,14 +252,15 @@ def main():
     page = {"title": spec.get("title", "Map makers compared"), "subtitle": spec.get("subtitle", ""), "built": spec.get("built", ""),
             "difficulties": diffs, "songs": songs, "methods": methods, "rows": rows, "real": real_out, "snapping": snapping,
             "runs": [read_run(r) for r in spec.get("runs", [])], "speed": spec.get("speed", []), "notes": spec.get("notes", []),
-            "realAbout": spec.get("realAbout", {}), "offsetBins": OFFSET_BINS, "densityBin": DENSITY_BIN, "shifts": SHIFTS}
+            "realAbout": spec.get("realAbout", {}), "public": bool(spec.get("public")), "credits": spec.get("credits", []), "songsLabel": spec.get("songsLabel", ""),
+            "offsetBins": OFFSET_BINS, "densityBin": DENSITY_BIN, "shifts": SHIFTS}
     blob = json.dumps(page, separators=(",", ":")).replace("</", "<\\/")
     html = open(os.path.join(HERE, "analysis.html")).read().replace('"__DATA__"', blob)
     os.makedirs(os.path.dirname(os.path.abspath(out_path)), exist_ok=True)
     open(out_path, "w").write(html)
     # For report_server.py: the song files it may serve, by song key.
     audio = {s["key"]: s["audio"][len("file://"):] for s in songs if s.get("audio")}
-    if audio:
+    if audio and not spec.get("public"):
         json.dump(audio, open(os.path.join(os.path.dirname(os.path.abspath(out_path)), "audio.json"), "w"), indent=1)
     print(f"wrote {out_path}: {len(songs)} songs, {len(rows)} maps, {len(html) / 1e6:.1f} MB")
 

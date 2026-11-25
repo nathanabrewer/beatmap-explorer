@@ -142,8 +142,8 @@ table.data th { color: var(--text-secondary); font-weight: 600; position: sticky
 <main>
   <section id="overview"><h2>Overview</h2><p class="lede" id="overview-lede"></p><div class="tiles" id="tiles"></div></section>
   <section id="makers"><h2>Map makers: what each one is</h2><p class="lede">Where every row in this report comes from. "Onset snap" rows are not separate models: they are a model's maps with one clean-up step afterwards.</p><div class="makers" id="makers-list"></div></section>
-  <section id="leaderboard"><h2>Leaderboard</h2><p class="lede">Mean over the selected songs and difficulties. Every method is scored by the same code against the real maps. Hover a bar for the spread.</p><div class="card" id="c-board"></div></section>
-  <section id="allmetrics"><h2>All metrics at a glance</h2><p class="lede">The same means for every metric. Timing, colour, placement and cut: higher is better. Density: 1.0 means as many notes as the real map. Swing errors: lower is better (the real maps' own rate is the reference line).</p><div class="grid g3" id="c-multi"></div></section>
+  <section id="leaderboard"><h2>Leaderboard</h2><p class="lede">Mean over the selected songs and difficulties. Every method is scored by the same code against the reference maps. Hover a bar for the spread.</p><div class="card" id="c-board"></div></section>
+  <section id="allmetrics"><h2>All metrics at a glance</h2><p class="lede">The same means for every metric. Timing, colour, placement and cut: higher is better. Density: 1.0 means as many notes as the reference map. Swing errors: lower is better (the reference maps' own rate is the line).</p><div class="grid g3" id="c-multi"></div></section>
   <section id="songs"><h2>Song by song</h2><p class="lede">The selected metric for every song and method (difficulties averaged unless one is selected). Click a song to inspect it below.</p><div class="card" id="c-heat"></div></section>
   <section id="timing"><h2>Timing</h2><p class="lede">How far each generated note is from the nearest real note. A score counts a note as on time within 30 ms (the shaded band). A method whose whole map is early or late shows a shifted peak and a best shift away from zero.</p>
     <div class="card" id="c-offsets"></div>
@@ -154,13 +154,15 @@ table.data th { color: var(--text-secondary); font-weight: 600; position: sticky
     <div class="card" id="c-density"></div>
     <div class="card" id="c-strip" style="margin-top:16px"></div>
     <div class="card" id="c-songtable" style="margin-top:16px"></div></section>
-  <section id="player"><h2>Virtual player</h2><p class="lede">Two players swing the selected song side by side: the real map on the left (an expert's motion), another map on the right. Each cut is a stroke through its note in its arrow's direction; between cuts the saber curves from one cut into the next, and the arms follow by inverse kinematics from the shoulders. Good flow is a smooth pendulum. Flagged: a hand having to reposition between cuts faster than 99% of this song's real map asks (a snap), and the arms crossing. Click a flagged moment to jump there.</p>
+  <section id="player"><h2>Virtual player</h2><p class="lede">Two players swing the selected song side by side: the reference map on the left (an expert mapper's motion), another map on the right. Each cut is a stroke through its note in its arrow's direction; between cuts the saber curves from one cut into the next, and the arms follow by inverse kinematics from the shoulders. Good flow is a smooth pendulum. Flagged: a hand having to reposition between cuts faster than 99% of this song's reference map asks (a snap), and the arms crossing. Click a flagged moment to jump there.</p>
     <div class="card">
       <div class="strip-controls">
         <button id="vp-play">Play</button>
         <label style="color:var(--text-secondary);font-size:13px">Speed <select id="vp-speed"><option value="0.25">¼×</option><option value="0.5">½×</option><option value="1" selected>1×</option></select></label>
         <label style="color:var(--text-secondary);font-size:13px">Right side <select id="vp-method"></select></label>
         <label style="color:var(--text-secondary);font-size:13px"><input type="checkbox" id="vp-sound" checked> Sound</label>
+        <label class="vp-sync" style="color:var(--text-secondary);font-size:13px" title="How late the sound reaches you. Measured from the output automatically; add more for Bluetooth headphones until the ticks land on the beat.">Sound delay <input type="number" id="vp-delay" value="0" step="10" style="width:64px"> ms <span id="vp-auto"></span></label>
+        <label class="vp-sync" style="color:var(--text-secondary);font-size:13px" title="A click on every note of the reference map, through the same speakers: if the clicks land on the music, the timing is right."><input type="checkbox" id="vp-ticks"> Ticks</label>
         <input type="range" id="vp-time" min="0" max="100" step="0.01" value="0" aria-label="Time">
         <span id="vp-clock" style="min-width:92px;color:var(--text-secondary);font-size:13px"></span>
         <button id="vp-flag" title="Flag this moment (F)">⚑ Flag this moment</button>
@@ -169,20 +171,21 @@ table.data th { color: var(--text-secondary); font-weight: 600; position: sticky
       <form id="vp-form" class="vp-form" hidden>
         <div class="row"><b id="vp-form-time"></b>
           <label><input type="radio" name="vp-map" value="right" checked> <span id="vp-form-right"></span></label>
-          <label><input type="radio" name="vp-map" value="real"> Real map</label></div>
+          <label><input type="radio" name="vp-map" value="real"> Reference map</label></div>
         <div class="row" id="vp-tags"></div>
         <div class="row"><input id="vp-note-text" type="text" placeholder="What's wrong here? (optional)" style="flex:1"><button type="submit">Save flag</button><button type="button" id="vp-cancel">Cancel</button></div>
       </form>
-      <div class="vp-row"><div class="vp-side"><div class="sub" id="vp-l-name">Real map</div><canvas id="vp-l" height="420"></canvas><div class="vp-events" id="vp-l-ev"></div></div>
+      <div class="vp-row"><div class="vp-side"><div class="sub" id="vp-l-name">Reference map</div><canvas id="vp-l" height="420"></canvas><div class="vp-events" id="vp-l-ev"></div></div>
       <div class="vp-side"><div class="sub" id="vp-r-name"></div><canvas id="vp-r" height="420"></canvas><div class="vp-events" id="vp-r-ev"></div></div></div>
       <audio id="vp-audio" preload="auto"></audio>
       <p class="sub" id="vp-note"></p>
       <div class="vp-flags" id="vp-flags"></div>
     </div></section>
-  <section id="training"><h2>Training</h2><p class="lede">Held-out loss (on BeatSaver songs each run never trained on) over training time. Lower is better. Runs with different data sizes hold out different songs, so compare shapes more than exact values.</p>
+  <section id="training"><h2>Training</h2><p class="lede">Held-out loss (on songs each run never trained on) over training time. Lower is better. Runs with different data sizes hold out different songs, so compare shapes more than exact values.</p>
     <div class="grid g2"><div class="card" id="c-loss"></div><div class="card" id="c-njs"></div></div></section>
   <section id="speed"><h2>Speed</h2><p class="lede">Compute time to write maps, as measured.</p><div class="grid g2"><div class="card" id="c-speed"></div><div class="card" id="c-gen"></div></div></section>
   <section id="notes"><h2>How to read this</h2><div class="card"><ul class="notes" id="notes-list"></ul></div></section>
+  <section id="credits" hidden><h2>Credits</h2><div class="card"><ul class="notes" id="credits-list"></ul></div></section>
 </main>
 <div id="tip" role="tooltip"></div>
 </div>
@@ -409,15 +412,14 @@ function renderOverview() {
   const r = ranked("timingF1");
   const ready = DATA.methods.filter(m => !m.pending);
   const best = r.find(x => !isNaN(x.st.mean));
-  const ours = r.filter(x => !isNaN(x.st.mean) && !["inferno", "mapgen"].includes(x.m.id));
-  const inferno = r.find(x => x.m.id === "inferno"), mapgen = r.find(x => x.m.id === "mapgen");
-  $("overview-lede").textContent = `${DATA.songs.length} official songs that no map in our BeatSaver training list covers, Expert and Expert+, ${DATA.rows.length} generated maps across ${ready.length} methods` + (DATA.methods.length > ready.length ? ` (${DATA.methods.length - ready.length} still pending).` : ".");
+  const ours = r.filter(x => !isNaN(x.st.mean) && !x.m.external);
+  const others = r.filter(x => !isNaN(x.st.mean) && x.m.external);
+  $("overview-lede").textContent = `${DATA.songs.length} ${DATA.songsLabel || "test songs that none of our models trained on"}, Expert and Expert+, ${DATA.rows.length} generated maps across ${ready.length} methods` + (DATA.methods.length > ready.length ? ` (${DATA.methods.length - ready.length} still pending).` : ".");
   const T = $("tiles"); T.replaceChildren();
   const tile = (label, value, delta, hero) => { const t = el("div", {class: "card tile" + (hero ? " hero" : "")}); t.append(el("div", {class: "label"}, label), el("div", {class: "value"}, value)); if (delta) t.append(el("div", {class: "delta"}, delta)); T.append(t); };
   if (best) tile(`Best timing F1 · ${best.m.name}`, best.st.mean.toFixed(2), `mean of ${best.st.n} maps, ${state.song === "all" ? "all songs" : songsByKey[state.song].title}`, true);
   if (ours.length) tile(`Best of ours · ${ours[0].m.name}`, ours[0].st.mean.toFixed(2), "timing F1");
-  if (inferno && !isNaN(inferno.st.mean)) tile("InfernoSaber", inferno.st.mean.toFixed(2), "timing F1 (given the real note density)");
-  if (mapgen && !isNaN(mapgen.st.mean)) tile("mapgen (rules)", mapgen.st.mean.toFixed(2), "timing F1");
+  for (const x of others) tile(x.m.name, x.st.mean.toFixed(2), x.m.tileNote || "timing F1");
   tile("Test songs", String(state.song === "all" ? DATA.songs.length : 1), `${rowsFor().length} maps in view`);
 }
 
@@ -428,8 +430,8 @@ function renderBoard() {
   const items = ranked(M.id).map(x => ({name: x.m.name, color: color(x.m), value: x.st.mean,
     tip: [{value: M.fmt(x.st.mean), label: "mean"}, {value: isNaN(x.st.median) ? "" : M.fmt(x.st.median), label: "median"}, {value: x.st.n ? `${M.fmt(x.st.min)} – ${M.fmt(x.st.max)}` : "", label: "range"}, {value: String(x.st.n), label: "maps"}].concat(x.m.note ? [{value: "", label: x.m.note}] : [])}));
   const opts = {fmt: M.fmt, max: M.max, aria: `${M.name} by method`};
-  if (M.id === "density") { opts.ref = 1; opts.refLabel = "real map"; opts.tick = t => "×" + t; }
-  if (M.id === "swingErrors") { opts.ref = realSwing(); opts.refLabel = "real maps"; }
+  if (M.id === "density") { opts.ref = 1; opts.refLabel = "reference"; opts.tick = t => "×" + t; }
+  if (M.id === "swingErrors") { opts.ref = realSwing(); opts.refLabel = "reference maps"; }
   hbars(body, items, opts);
 }
 
@@ -617,12 +619,12 @@ function renderDetail() {
   state.detailSong = key;
   const song = songsByKey[key];
   const diff = state.diff === "all" ? "ExpertPlus" : state.diff;
-  $("detail-lede").textContent = `${song.title} · ${song.artist} · ${DIFF_NAMES[diff]}${state.diff === "all" ? " (pick Expert in the filters to switch)" : ""} · ${Math.round(song.seconds)} s. Pick another song in the filters or click one in the table above.`;
+  $("detail-lede").textContent = `${song.title} · ${song.artist}${song.mapper ? " · mapped by " + song.mapper : ""} · ${DIFF_NAMES[diff]}${state.diff === "all" ? " (pick Expert in the filters to switch)" : ""} · ${Math.round(song.seconds)} s. Pick another song in the filters or click one in the table above.`;
   const real = DATA.real[`${key}|${diff}`];
   const mrows = DATA.methods.filter(m => !m.pending).map(m => ({m, r: DATA.rows.find(r => r.m === m.id && r.s === key && r.d === diff)})).filter(x => x.r);
   const bin = DATA.densityBin;
   // density over time
-  const series = [{id: "real", name: "Real map", short: "real", color: "var(--ref)", width: 2.5, area: true, points: real ? real.dens.map((v, i) => [i * bin + bin / 2, v]) : []}]
+  const series = [{id: "real", name: refName(song), short: "reference", color: "var(--ref)", width: 2.5, area: true, points: real ? real.dens.map((v, i) => [i * bin + bin / 2, v]) : []}]
     .concat(mrows.map(({m, r}) => ({id: m.id, name: m.name, color: color(m), points: r.dens.map((v, i) => [i * bin + bin / 2, v])})));
   const body = card("c-density", "Notes per second over the song", `${bin}-second bins. Hover for every map at that moment; click legend entries to hide them.`, () => table(["Time", ...series.map(s => s.name)], (series[0].points.length ? series[0].points : series[1]?.points || []).map((p, i) => [clock(p[0]), ...series.map(s => s.points[i] ? s.points[i][1].toFixed(1) : "")])));
   body.append(legend(series.map(s => ({id: s.id, name: s.name, color: s.color})), true));
@@ -633,6 +635,7 @@ function renderDetail() {
   const tb = card("c-songtable", `Scores for ${song.title}`, DIFF_NAMES[diff]);
   tb.append(table(["Method", "Timing F1", "Colour F1", "Placement", "Cut", "Density", "Swing errors", "Best shift"], mrows.map(({m, r}) => [m.name, r.sc.timingF1.toFixed(2), r.sc.colourF1.toFixed(2), r.sc.place.toFixed(2), r.sc.cut.toFixed(2), "×" + r.sc.density.toFixed(2), r.sc.swingErrors.toFixed(1), (r.shift > 0 ? "+" : "") + r.shift + " ms"])));
 }
+function refName(song) { return song && song.mapper ? `Reference map by ${song.mapper}` : "Reference map"; }
 function clock(t) { const m = Math.floor(t / 60), s = Math.floor(t % 60); return `${m}:${String(s).padStart(2, "0")}`; }
 
 function renderStrip(key, diff, song, real, mrows) {
@@ -649,7 +652,7 @@ function renderStrip(key, diff, song, real, mrows) {
     holder.replaceChildren();
     const t0 = state.stripStart, t1 = t0 + span;
     lab.textContent = `${clock(t0)} – ${clock(t1)}`;
-    const rows = [{name: "Real map", color: "var(--ref)", notes: real ? real.notes.map(n => n.concat([1])) : []}].concat(mrows.map(({m, r}) => ({name: m.name, color: color(m), notes: r.notes})));
+    const rows = [{name: refName(song), color: "var(--ref)", notes: real ? real.notes.map(n => n.concat([1])) : []}].concat(mrows.map(({m, r}) => ({name: m.name, color: color(m), notes: r.notes})));
     const W = width(holder), Lw = Math.min(190, W * 0.3), rowH = 44, H = rows.length * rowH + 22;
     const X = t => Lw + (W - Lw - 8) * (t - t0) / span;
     const s = sv("svg", {width: W, height: H});
@@ -712,7 +715,7 @@ function renderMakers() {
     for (const [k, v] of Object.entries(about || {})) dl.append(el("dt", {}, k), el("dd", {}, v));
     c.append(dl); host.append(c);
   };
-  add("Real map", "var(--ref)", DATA.realAbout, "The reference");
+  add("Reference map", "var(--ref)", DATA.realAbout, "What every map is scored against");
   for (const m of DATA.methods) {
     const rs = DATA.rows.filter(r => r.m === m.id);
     add(m.name, color(m), m.about || (m.note ? {"About": m.note} : {}), rs.length ? `${rs.length} maps scored · timing F1 ${mean(rs.map(r => r.sc.timingF1)).toFixed(2)}` : "not scored yet");
@@ -720,6 +723,10 @@ function renderMakers() {
 }
 
 function renderNotes() {
+  if (DATA.credits && DATA.credits.length) {
+    $("credits").hidden = false;
+    const cl = $("credits-list"); cl.replaceChildren(...DATA.credits.map(c => el("li", {}, c)));
+  }
   const ul = $("notes-list"); ul.replaceChildren();
   for (const m of METRICS) ul.append(el("li", {}, `${m.name}: ${m.about}.`));
   for (const n of DATA.notes) ul.append(el("li", {}, n));
@@ -828,18 +835,19 @@ function vpSetup() {
   $("vp-time").max = dur;
   if (VP.t > dur) VP.t = 0;
   if (!VP.t) VP.t = Math.max(0, (VP.left.sw[0][0] || VP.left.sw[1][0] || {t: 1}).t - 1);
-  $("vp-l-name").textContent = `Real map · ${song.title} · ${DIFF_NAMES[diff]}`;
+  $("vp-l-name").textContent = `${refName(song)} · ${song.title} · ${DIFF_NAMES[diff]}`;
   $("vp-r-name").textContent = (methodsById[VP.method] || {}).name || "";
   const audio = $("vp-audio"), served = location.protocol.startsWith("http");
   const src = song.audio ? (served ? `/audio/${song.key}` : song.audio) : "";
   if (src && audio.dataset.src !== src) { audio.dataset.src = src; audio.src = src; }
-  $("vp-note").textContent = (song.audio ? "Sound: the song's file on this Mac. " : "No audio file for this song. ") +
+  $("vp-note").textContent = DATA.public ? "No audio: the songs belong to their owners and are not included." :
+    (song.audio ? "Sound: the song's file on this Mac. " : "No audio file for this song. ") +
     (served ? "Flags are saved to flags.jsonl beside the report." : "Flags are kept in this browser (open the report through report_server.py to save them to a file).");
   renderFlags();
   for (const [id, ev] of [["vp-l-ev", VP.evL], ["vp-r-ev", VP.evR]]) {
     const box = $(id); box.replaceChildren();
     const snaps = ev.filter(e => e.kind === "snap").length, coll = ev.length - snaps;
-    box.append(el("div", {}, `${snaps} snap${snaps === 1 ? "" : "s"} (a hand repositioning faster than ${VP.limit.toFixed(1)} m/s, beyond 99% of this song's real map), ${coll} time${coll === 1 ? "" : "s"} arms crossed`));
+    box.append(el("div", {}, `${snaps} snap${snaps === 1 ? "" : "s"} (a hand repositioning faster than ${VP.limit.toFixed(1)} m/s, beyond 99% of this song's reference map), ${coll} time${coll === 1 ? "" : "s"} arms crossed`));
     for (const e of ev.slice(0, 40)) { const b = el("button", {}, `${clock(e.t)} ${e.kind}`); b.onclick = () => vpSeek(e.t - 1.2); box.append(b); }
   }
   vpDraw();
@@ -899,11 +907,28 @@ function vpDraw() {
   vpRender("vp-r", VP.right, vpNotes(VP.method), VP.evR);
   $("vp-time").value = VP.t; $("vp-clock").textContent = `${clock(VP.t)} · ${VP.t.toFixed(2)} s`;
 }
+// The audio element reports the position it has sent out; the speakers play
+// it a little later (more with Bluetooth). The picture follows what is heard:
+// the output latency the browser reports, plus a manual delay.
+function soundDelay() { return (VP.latency || 0) + (+$("vp-delay").value || 0) / 1000; }
+function vpTicks(mediaNow) {
+  if (!$("vp-ticks").checked || !VP.ctx) return;
+  const ahead = 0.25, until = mediaNow + ahead, from = Math.max(VP.tickedTo || -1, mediaNow);
+  for (const n of vpNotes("real")) {
+    const t = n[0] / 100;
+    if (t <= from || t > until) continue;
+    const at = VP.ctx.currentTime + (t - mediaNow) / (+$("vp-speed").value || 1);
+    const o = VP.ctx.createOscillator(), g = VP.ctx.createGain();
+    o.frequency.value = n[1] === 0 ? 1500 : 2000; g.gain.setValueAtTime(0.25, at); g.gain.exponentialRampToValueAtTime(0.001, at + 0.03);
+    o.connect(g).connect(VP.ctx.destination); o.start(at); o.stop(at + 0.04);
+  }
+  VP.tickedTo = until;
+}
 function vpTick(now) {
   if (!VP.playing) return;
   const a = $("vp-audio"), rate = +$("vp-speed").value;
-  if (a.src && $("vp-sound").checked && !a.paused) VP.t = a.currentTime;
-  else VP.t += (now - VP.last) / 1000 * rate;
+  if (a.src && $("vp-sound").checked && !a.paused) { vpTicks(a.currentTime); VP.t = a.currentTime - soundDelay() * rate; }
+  else { VP.t += (now - VP.last) / 1000 * rate; vpTicks(VP.t); }
   VP.last = now;
   if (VP.t >= +$("vp-time").max) { VP.playing = false; $("vp-play").textContent = "Play"; a.pause(); }
   vpDraw();
@@ -930,7 +955,7 @@ async function flagDelete(id) {
   if (FLAGS.served) await fetch(`/flags/${id}`, {method: "DELETE"});
   FLAGS.list = FLAGS.list.filter(f => f.id !== id); flagsKeep(); renderFlags();
 }
-function mapName(id) { return id === "real" ? "Real map" : (methodsById[id] || {}).name || id; }
+function mapName(id) { return id === "real" ? "Reference map" : (methodsById[id] || {}).name || id; }
 function renderFlags() {
   const box = $("vp-flags"), marks = $("vp-marks");
   if (!box || !VP.key) return;
@@ -960,6 +985,12 @@ function flagOpen() {
   $("vp-note-text").value = ""; $("vp-form").hidden = false; $("vp-note-text").focus();
 }
 function vpWire() {
+  if (DATA.public) {
+    for (const id of ["vp-flag", "vp-flags", "vp-marks"]) $(id).hidden = true;
+    $("vp-sound").closest("label").hidden = true;
+    $("vp-sound").checked = false;
+    document.querySelectorAll(".vp-sync").forEach(e => { e.hidden = true; });
+  }
   $("vp-flag").onclick = flagOpen;
   $("vp-cancel").onclick = () => { $("vp-form").hidden = true; };
   $("vp-form").onsubmit = e => {
@@ -969,14 +1000,22 @@ function vpWire() {
     flagAdd({song: VP.key, difficulty: VP.diff, map, time: +t.toFixed(3), tags: [...document.querySelectorAll("#vp-tags input:checked")].map(i => i.value), note: $("vp-note-text").value.trim(), notes: near});
     $("vp-form").hidden = true;
   };
-  document.addEventListener("keydown", e => { if ((e.key === "f" || e.key === "F") && !["INPUT", "TEXTAREA", "SELECT"].includes(document.activeElement.tagName) && $("vp-form").hidden) { e.preventDefault(); flagOpen(); } });
+  document.addEventListener("keydown", e => { if (!DATA.public && (e.key === "f" || e.key === "F") && !["INPUT", "TEXTAREA", "SELECT"].includes(document.activeElement.tagName) && $("vp-form").hidden) { e.preventDefault(); flagOpen(); } });
   $("vp-play").onclick = () => {
     const a = $("vp-audio");
     VP.playing = !VP.playing; $("vp-play").textContent = VP.playing ? "Pause" : "Play";
-    if (VP.playing) { VP.last = performance.now(); if (a.src && $("vp-sound").checked) { a.currentTime = VP.t; a.playbackRate = +$("vp-speed").value; a.play().catch(() => {}); } requestAnimationFrame(vpTick); }
+    if (VP.playing) {
+      if (!VP.ctx) { try { VP.ctx = new AudioContext(); } catch (e) { VP.ctx = null; } }
+      if (VP.ctx) { VP.ctx.resume(); VP.latency = (VP.ctx.outputLatency || 0) + (VP.ctx.baseLatency || 0); $("vp-auto").textContent = `(+${Math.round(VP.latency * 1000)} ms measured)`; }
+      VP.tickedTo = -1; VP.last = performance.now();
+      if (a.src && $("vp-sound").checked) { a.currentTime = VP.t; a.playbackRate = +$("vp-speed").value; a.play().catch(() => {}); }
+      requestAnimationFrame(vpTick);
+    }
     else a.pause();
   };
-  $("vp-time").oninput = e => vpSeek(+e.target.value);
+  $("vp-time").oninput = e => { VP.tickedTo = -1; vpSeek(+e.target.value); };
+  $("vp-delay").value = localStorage.getItem("bx-sound-delay") || "0";
+  $("vp-delay").onchange = () => localStorage.setItem("bx-sound-delay", $("vp-delay").value);
   $("vp-speed").onchange = () => { $("vp-audio").playbackRate = +$("vp-speed").value; };
   $("vp-sound").onchange = () => { const a = $("vp-audio"); if (!$("vp-sound").checked) a.pause(); else if (VP.playing && a.src) { a.currentTime = VP.t; a.play().catch(() => {}); } };
   $("vp-method").onchange = e => { VP.method = e.target.value; vpSetup(); };
@@ -999,7 +1038,7 @@ document.querySelectorAll("main section").forEach(s => obs.observe(s));
 let rt; window.addEventListener("resize", () => { clearTimeout(rt); rt = setTimeout(renderAll, 150); });
 vpWire();
 renderAll();
-flagsLoad();
+if (!DATA.public) flagsLoad();
 </script>
 </body>
 </html>
